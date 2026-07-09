@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VC_FILTER_DEFAULT='SNP filter:snp:QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0; INDEL filter:indel:QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0'
+VC_FILTER_DEFAULT=''
+# VC_FILTER_DEFAULT='SNP filter:snp:QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0; INDEL filter:indel:QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0'
 
 usage() {
     cat <<EOF
@@ -42,8 +43,8 @@ ENABLE_VC=true
 DRY_RUN=false
 CREATE_ONLY=false
 # Nirvana annotation defaults (override via environment if needed)
-NIRVANA_BIN="/opt/edico/share/nirvana/Nirvana"
-NIRVANA_CACHE="/staging/human/reference/hg19/annotation_data_files/Cache/GRCh37/Both"
+NIRVANA_BIN="/opt/dragen/4.4.7/share/nirvana/Nirvana"
+NIRVANA_CACHE="/staging/human/reference/hg19/annotation_data_files/Cache/GRCh37"
 NIRVANA_DAT="/staging/human/reference/hg19/annotation_data_files/References/Homo_sapiens.GRCh37.Nirvana.dat"
 NIRVANA_SD="/staging/human/reference/hg19/annotation_data_files/SupplementaryAnnotation/GRCh37"
 
@@ -96,17 +97,24 @@ run_one() {
         -1 "$r1" \
         -2 "$r2" \
         --enable-variant-caller "$ENABLE_VC" \
+        --enable-map-align true \
+        --enable-map-align-output true \
+        --output-format BAM \
         --RGID "$RGID" \
         --RGSM "$sample" \
         --output-directory "$outdir" \
         --output-file-prefix "$prefix" \
 	--remove-duplicates true \
-        --vc-hard-filter "$VC_FILTER"
         --read-trimmers adapter,quality \
 	--trim-adapter-read1 /staging/human/Trimmomatic-0.39/adapters/TruSeq3-PE-2.fa \
 	--trim-adapter-read2 /staging/human/Trimmomatic-0.39/adapters/TruSeq3-PE-2.fa \
 	--trim-min-quality 15 \
 	--trim-min-length 20)
+
+    # apply a hard filter only when one is provided (default empty; set via --vc-filter)
+    if [ -n "$VC_FILTER" ]; then
+        cmd+=(--vc-hard-filter "$VC_FILTER")
+    fi
 
     if [ "$DRY_RUN" = true ] || [ "$CREATE_ONLY" = true ]; then
         printf "DRY: %s\n" "${cmd[*]}"

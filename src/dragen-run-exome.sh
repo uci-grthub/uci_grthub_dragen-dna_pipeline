@@ -24,7 +24,7 @@ Usage: $(basename "$0") [options]
 Generalized driver for running DRAGEN on multiple exome samples.
 
 Options:
-  --reference PATH        DRAGEN hash-table reference dir (default: hg38 hash table)
+  --reference PATH        DRAGEN reference dir (default: hg38 pangenome, hashtable v11)
   --input-dir PATH        Directory where FASTQ files live (optional when sample file contains full paths)
   --sample-file PATH      CSV file with lines: sample,R1,R2  (R1/R2 may be basenames or full paths)
   --output-base PATH      Base output directory (required)
@@ -43,7 +43,7 @@ Options:
   -h, --help              Show this help
 
 Examples:
-  $(basename "$0") --input-dir /data/fastq --sample-file samples.csv --output-base results
+  $(basename "$0") --input-dir /data/FASTQ --sample-file data/samples.csv --output-base output
 
 Sample file format:
   CSV with either 3 columns: sample,R1,R2  (R1/R2 can be basenames or full paths)
@@ -55,7 +55,7 @@ EOF
 # defaults
 INPUT_DIR=""
 SAMPLE_FILE=""
-REFERENCE="/staging/human/reference/hg38/hg38_hash_table"
+REFERENCE="/staging/human/reference/hg38/pangenome_reference"
 OUTPUT_BASE=""
 TARGET_BED="$TARGET_BED_DEFAULT"
 TARGET_PADDING=100
@@ -69,10 +69,10 @@ ENABLE_VC=true
 DRY_RUN=false
 CREATE_ONLY=false
 # Nirvana annotation defaults (hg38 / GRCh38; override via environment if needed)
-NIRVANA_BIN="/opt/edico/share/nirvana/Nirvana"
-NIRVANA_CACHE="/staging/human/reference/hg38/annotation_data_files/Cache/GRCh38/Both"
+NIRVANA_BIN="/opt/dragen/4.4.7/share/nirvana/Nirvana"
+NIRVANA_CACHE="/staging/human/reference/hg38/annotation_data_files/Cache/GRCh38"
 NIRVANA_DAT="/staging/human/reference/hg38/annotation_data_files/References/Homo_sapiens.GRCh38.Nirvana.dat"
-NIRVANA_SD="/staging/human/reference/hg38/annotation_data_files/SupplementaryAnnotation/GRCh38"
+NIRVANA_SD="/staging/human/reference/hg38/annotation_data_files/SupplementaryAnnotation/GRCh38_curated"
 
 if [ $# -eq 0 ]; then
     usage

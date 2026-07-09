@@ -13,7 +13,7 @@ usage() {
 Usage: $(basename "$0") [options]
 
 Options:
-  --input-dir PATH   Directory containing paired FASTQ files (default: data)
+  --input-dir PATH   Directory containing paired FASTQ files (default: data/FASTQ)
   --output PATH      Output CSV path (default: stdout)
   --r1-tag STR       R1 marker in filenames (default: R1)
   --r2-tag STR       R2 marker in filenames (default: R2)
@@ -23,7 +23,7 @@ EOF
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INPUT_DIR="$SCRIPT_DIR/../data"
+INPUT_DIR="$SCRIPT_DIR/../data/FASTQ"
 OUTPUT=""
 R1_TAG="R1"
 R2_TAG="R2"

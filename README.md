@@ -15,8 +15,8 @@ skip it):
 ./src/make-sample-file.sh --abs --output data/samples.csv
 ```
 
-Options: `--input-dir` (default `data`), `--output` (default stdout), `--abs`,
-`--r1-tag` / `--r2-tag` (defaults `R1` / `R2`).
+Options: `--input-dir` (default `data/FASTQ`), `--output` (default stdout),
+`--abs`, `--r1-tag` / `--r2-tag` (defaults `R1` / `R2`).
 
 ---
 
@@ -55,7 +55,7 @@ Key options: `--reference`, `--input-dir`, `--sample-file`, `--output-base`,
 Restricts variant calling to the IDT xGen Exome Research Panel v2 target BED
 (hg38), pads targets, reports on-target coverage QC, and writes BAMs.
 
-- **Reference**: hg38 hash table (`/staging/human/reference/hg38/hg38_hash_table`)
+- **Reference**: hg38 pangenome (`/staging/human/reference/hg38/pangenome_reference`, hashtable v11)
 - **BEDs**: `/staging/human/reference/hg38/exome_beds/idt_x_gen_exome_research_panel_v2`
   - kit: `xgen-exome-hyb-panel-v2-{targets,probes}-hg38.bed`
   - spike-in: `spike-in-xgen-exome-v2-{targets,probes}-hg38.bed`

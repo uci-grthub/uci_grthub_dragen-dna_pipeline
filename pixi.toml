@@ -1,0 +1,19 @@
+[workspace]
+authors = ["whtns <kevin.stachelek@gmail.com>"]
+channels = ["conda-forge", "bioconda"]
+name = "260709_KainZ_exome"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[dependencies]
+snakemake-minimal = ">=8"
+multiqc = "*"
+bedtools = "*"
+
+[tasks]
+# regenerate the sample sheet from data/FASTQ
+samples = "bash src/make-sample-file.sh --abs --output data/samples.csv"
+# dry-run the workflow (no execution)
+dryrun = "snakemake -n --resources dragen=1"
+# run the full pipeline; DRAGEN serialized to one FPGA job at a time
+run = "snakemake --cores all --resources dragen=1"

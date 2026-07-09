@@ -1,0 +1,43 @@
+# Config for the DRAGEN exome + Nirvana + MultiQC Snakemake workflow.
+
+# Sample sheet: CSV with `sample,R1,R2` lines (# comments ignored).
+# Regenerate with: pixi run samples
+samples_csv: "data/samples.csv"
+
+# Base output directory (one subdirectory per sample is created).
+outdir: "output"
+
+# DRAGEN binary and reference (hg38 pangenome, hashtable v11).
+dragen_bin: "/opt/dragen/4.4.7/bin/dragen"
+reference: "/staging/human/reference/hg38/pangenome_reference"
+rgid: "Illumina_RGID"
+
+# Exome capture BEDs — IDT xGen Exome Research Panel v2 (hg38).
+target_bed: "/staging/human/reference/hg38/exome_beds/idt_x_gen_exome_research_panel_v2/xgen-exome-hyb-panel-v2-targets-hg38.bed"
+probe_bed:  "/staging/human/reference/hg38/exome_beds/idt_x_gen_exome_research_panel_v2/xgen-exome-hyb-panel-v2-probes-hg38.bed"
+
+# Spike-in panel — set with_spike_in: true to call + QC over the union of
+# kit + spike-in regions (this prep used the spike-in).
+with_spike_in: true
+spike_target_bed: "/staging/human/reference/hg38/exome_beds/idt_x_gen_exome_research_panel_v2/spike-in-xgen-exome-v2-targets-hg38.bed"
+spike_probe_bed:  "/staging/human/reference/hg38/exome_beds/idt_x_gen_exome_research_panel_v2/spike-in-xgen-exome-v2-probes-hg38.bed"
+
+# Bases padded each side of target regions for variant calling (calling only).
+target_padding: 100
+
+# Adapter + quality trimming.
+trim_adapter_r1: "/staging/human/Trimmomatic-0.39/adapters/TruSeq3-PE-2.fa"
+trim_adapter_r2: "/staging/human/Trimmomatic-0.39/adapters/TruSeq3-PE-2.fa"
+trim_min_quality: 15
+trim_min_length: 20
+
+# Variant-caller hard filter. Empty = no --vc-hard-filter passed.
+# Example:
+#   "SNP filter:snp:QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0; INDEL filter:indel:QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"
+vc_filter: ""
+
+# Nirvana annotation (GRCh38).
+nirvana_bin:   "/opt/dragen/4.4.7/share/nirvana/Nirvana"
+nirvana_cache: "/staging/human/reference/hg38/annotation_data_files/Cache/GRCh38"
+nirvana_dat:   "/staging/human/reference/hg38/annotation_data_files/References/Homo_sapiens.GRCh38.Nirvana.dat"
+nirvana_sd:    "/staging/human/reference/hg38/annotation_data_files/SupplementaryAnnotation/GRCh38_curated"

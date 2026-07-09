@@ -1,0 +1,144 @@
+import os
+
+configfile: "config/config.yaml"
+
+OUTDIR = config["outdir"]
+
+# ---- load sample sheet (sample,R1,R2; # comments ignored) ----
+SAMPLES = {}
+with open(config["samples_csv"]) as fh:
+    for raw in fh:
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) != 3:
+            raise ValueError(f"Bad sample line (need sample,R1,R2): {raw!r}")
+        s, r1, r2 = parts
+        SAMPLES[s] = (r1, r2)
+
+if not SAMPLES:
+    raise ValueError(f"No samples parsed from {config['samples_csv']}")
+
+# ---- target/probe BEDs: kit only, or kit+spike-in union ----
+if config["with_spike_in"]:
+    TARGET_BED = os.path.join(OUTDIR, "combined-targets-hg38.bed")
+    PROBE_BED  = os.path.join(OUTDIR, "combined-probes-hg38.bed")
+else:
+    TARGET_BED = config["target_bed"]
+    PROBE_BED  = config["probe_bed"]
+
+
+rule all:
+    input:
+        os.path.join(OUTDIR, "multiqc", "multiqc_report.html"),
+        expand(os.path.join(OUTDIR, "{sample}", "{sample}.json.gz"), sample=SAMPLES),
+
+
+# Merge kit + spike-in BEDs into a sorted, non-overlapping union.
+rule merge_beds:
+    input:
+        kit_t=config["target_bed"],
+        spk_t=config["spike_target_bed"],
+        kit_p=config["probe_bed"],
+        spk_p=config["spike_probe_bed"],
+    output:
+        t=os.path.join(OUTDIR, "combined-targets-hg38.bed"),
+        p=os.path.join(OUTDIR, "combined-probes-hg38.bed"),
+    shell:
+        r"""
+        cat {input.kit_t} {input.spk_t} | cut -f1-3 | sort -k1,1 -k2,2n | bedtools merge -i - > {output.t}
+        cat {input.kit_p} {input.spk_p} | cut -f1-3 | sort -k1,1 -k2,2n | bedtools merge -i - > {output.p}
+        """
+
+
+# DRAGEN map/align + variant call, restricted to the (padded) target BED,
+# with on-target coverage QC. Serialized via resources: dragen=1.
+rule dragen:
+    input:
+        r1=lambda wc: SAMPLES[wc.sample][0],
+        r2=lambda wc: SAMPLES[wc.sample][1],
+        target=TARGET_BED,
+        probe=PROBE_BED,
+    output:
+        bam=os.path.join(OUTDIR, "{sample}", "{sample}.bam"),
+        vcf=os.path.join(OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"),
+    params:
+        dragen=config["dragen_bin"],
+        ref=config["reference"],
+        rgid=config["rgid"],
+        padding=config["target_padding"],
+        adapter_r1=config["trim_adapter_r1"],
+        adapter_r2=config["trim_adapter_r2"],
+        min_q=config["trim_min_quality"],
+        min_len=config["trim_min_length"],
+        vc_filter=config["vc_filter"],
+        outdir=lambda wc: os.path.join(OUTDIR, wc.sample),
+    resources:
+        dragen=1,
+    shell:
+        r"""
+        filter_arg=()
+        if [ -n "{params.vc_filter}" ]; then
+            filter_arg=(--vc-hard-filter "{params.vc_filter}")
+        fi
+        {params.dragen} -f \
+            -r {params.ref} \
+            -1 {input.r1} \
+            -2 {input.r2} \
+            --enable-variant-caller true \
+            --enable-map-align true \
+            --enable-map-align-output true \
+            --output-format BAM \
+            --vc-target-bed {input.target} \
+            --vc-target-bed-padding {params.padding} \
+            --RGID {params.rgid} \
+            --RGSM {wildcards.sample} \
+            --output-directory {params.outdir} \
+            --output-file-prefix {wildcards.sample} \
+            --remove-duplicates true \
+            --read-trimmers adapter,quality \
+            --trim-adapter-read1 {params.adapter_r1} \
+            --trim-adapter-read2 {params.adapter_r2} \
+            --trim-min-quality {params.min_q} \
+            --trim-min-length {params.min_len} \
+            --qc-coverage-region-1 {input.target} \
+            --qc-coverage-reports-1 cov_report \
+            --qc-coverage-region-2 {input.probe} \
+            --qc-coverage-reports-2 cov_report \
+            "${{filter_arg[@]}}"
+        """
+
+
+# Nirvana annotation of the hard-filtered VCF (GRCh38).
+rule nirvana:
+    input:
+        vcf=os.path.join(OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"),
+    output:
+        json=os.path.join(OUTDIR, "{sample}", "{sample}.json.gz"),
+    params:
+        bin=config["nirvana_bin"],
+        cache=config["nirvana_cache"],
+        dat=config["nirvana_dat"],
+        sd=config["nirvana_sd"],
+        out_prefix=lambda wc: os.path.join(OUTDIR, wc.sample, wc.sample),
+    shell:
+        r"""
+        {params.bin} -c {params.cache} -r {params.dat} --sd {params.sd} \
+            -i {input.vcf} -o {params.out_prefix}
+        """
+
+
+# Aggregate all DRAGEN QC into a single MultiQC report.
+rule multiqc:
+    input:
+        expand(os.path.join(OUTDIR, "{sample}", "{sample}.bam"), sample=SAMPLES),
+    output:
+        os.path.join(OUTDIR, "multiqc", "multiqc_report.html"),
+    params:
+        scan=OUTDIR,
+        outdir=os.path.join(OUTDIR, "multiqc"),
+    shell:
+        r"""
+        multiqc {params.scan} -o {params.outdir} -n multiqc_report.html -f
+        """
