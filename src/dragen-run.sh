@@ -106,8 +106,7 @@ run_one() {
 	--trim-adapter-read1 /staging/human/Trimmomatic-0.39/adapters/TruSeq3-PE-2.fa \
 	--trim-adapter-read2 /staging/human/Trimmomatic-0.39/adapters/TruSeq3-PE-2.fa \
 	--trim-min-quality 15 \
-	--min-read-length 20 \
-	--force)
+	--trim-min-length 20)
 
     if [ "$DRY_RUN" = true ] || [ "$CREATE_ONLY" = true ]; then
         printf "DRY: %s\n" "${cmd[*]}"
