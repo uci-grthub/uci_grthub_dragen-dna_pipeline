@@ -17,7 +17,9 @@ Options:
   --cache PATH         Nirvana cache prefix (default: GRCh38 Both)
   --dat PATH           Nirvana reference .dat (default: GRCh38)
   --sd PATH            Supplementary annotation dir (default: GRCh38)
-  --force              Re-annotate even if a .json.gz output already exists
+  --output-format STR  Nirvana output format: vcf (default) or json.
+                       vcf and json are mutually exclusive per run.
+  --force              Re-annotate even if the output already exists
   --dry-run            Print commands but do not execute
   -h, --help           Show this help
 EOF
@@ -29,6 +31,7 @@ NIRVANA_BIN="/opt/dragen/4.4.7/share/nirvana/Nirvana"
 NIRVANA_CACHE="/staging/human/reference/hg38/annotation_data_files/Cache/GRCh38"
 NIRVANA_DAT="/staging/human/reference/hg38/annotation_data_files/References/Homo_sapiens.GRCh38.Nirvana.dat"
 NIRVANA_SD="/staging/human/reference/hg38/annotation_data_files/SupplementaryAnnotation/GRCh38_curated"
+OUTPUT_FORMAT="vcf"
 FORCE=false
 DRY_RUN=false
 
@@ -42,12 +45,19 @@ while [ $# -gt 0 ]; do
         --cache) NIRVANA_CACHE="$2"; shift 2;;
         --dat) NIRVANA_DAT="$2"; shift 2;;
         --sd) NIRVANA_SD="$2"; shift 2;;
+        --output-format) OUTPUT_FORMAT="$2"; shift 2;;
         --force) FORCE=true; shift;;
         --dry-run) DRY_RUN=true; shift;;
         -h|--help) usage; exit 0;;
         *) echo "Unknown option: $1" >&2; usage; exit 1;;
     esac
 done
+
+case "$OUTPUT_FORMAT" in
+    json) OUT_EXT=".json.gz";;
+    vcf)  OUT_EXT=".vcf.gz";;
+    *) echo "--output-format must be json or vcf" >&2; exit 1;;
+esac
 
 if [ -z "$OUTPUT_BASE" ]; then
     echo "--output-base is required" >&2
@@ -64,14 +74,15 @@ for vcf in "$OUTPUT_BASE"/*/*"$VCF_SUFFIX"; do
     found=$((found+1))
     dir="$(dirname "$vcf")"
     base="$(basename "$vcf" "$VCF_SUFFIX")"
-    out="$dir/$base"
+    out="$dir/$base.annotated"
 
-    if [ "$FORCE" = false ] && [ -e "$out.json.gz" ]; then
-        echo "Already annotated, skipping: $out.json.gz (use --force to redo)" >&2
+    if [ "$FORCE" = false ] && [ -e "$out$OUT_EXT" ]; then
+        echo "Already annotated, skipping: $out$OUT_EXT (use --force to redo)" >&2
         continue
     fi
 
-    cmd=("$NIRVANA_BIN" -c "$NIRVANA_CACHE" -r "$NIRVANA_DAT" --sd "$NIRVANA_SD" -i "$vcf" -o "$out")
+    cmd=("$NIRVANA_BIN" -c "$NIRVANA_CACHE" -r "$NIRVANA_DAT" --sd "$NIRVANA_SD" \
+         --output-format "$OUTPUT_FORMAT" -i "$vcf" -o "$out")
     if [ "$DRY_RUN" = true ]; then
         printf "DRY: %s\n" "${cmd[*]}"
     else

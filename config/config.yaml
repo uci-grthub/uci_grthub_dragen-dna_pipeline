@@ -1,5 +1,11 @@
 # Config for the DRAGEN exome + Nirvana + MultiQC Snakemake workflow.
 
+# Tool / reference versions (provenance record). The `versions` rule also
+# writes the live-detected values to <outdir>/versions.yaml at run time.
+dragen_version: "4.4.7"
+ica_version: "3.26.0"          # Illumina Connected Annotations (Nirvana)
+hashtable_version: "11"        # hg38 pangenome reference
+
 # Sample sheet: CSV with `sample,R1,R2` lines (# comments ignored).
 # Regenerate with: pixi run samples
 samples_csv: "data/samples.csv"
@@ -41,3 +47,5 @@ nirvana_bin:   "/opt/dragen/4.4.7/share/nirvana/Nirvana"
 nirvana_cache: "/staging/human/reference/hg38/annotation_data_files/Cache/GRCh38"
 nirvana_dat:   "/staging/human/reference/hg38/annotation_data_files/References/Homo_sapiens.GRCh38.Nirvana.dat"
 nirvana_sd:    "/staging/human/reference/hg38/annotation_data_files/SupplementaryAnnotation/GRCh38_curated"
+# Nirvana output format: json or vcf. json and vcf are mutually exclusive per run.
+nirvana_output_format: "vcf"

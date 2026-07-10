@@ -31,8 +31,27 @@ else:
 
 rule all:
     input:
+        os.path.join(OUTDIR, "versions.yaml"),
         os.path.join(OUTDIR, "multiqc", "multiqc_report.html"),
-        expand(os.path.join(OUTDIR, "{sample}", "{sample}.json.gz"), sample=SAMPLES),
+        expand(os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"), sample=SAMPLES),
+
+
+# Record live tool/reference versions for provenance.
+rule versions:
+    output:
+        os.path.join(OUTDIR, "versions.yaml"),
+    params:
+        dragen=config["dragen_bin"],
+        nirvana=config["nirvana_bin"],
+        ref=config["reference"],
+    shell:
+        r"""
+        {{
+          echo "dragen: \"$({params.dragen} --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')\""
+          echo "ica: \"$({params.nirvana} --version 2>&1 | grep -oiE 'Annotations [0-9.]+' | grep -oE '[0-9.]+')\""
+          echo "hashtable_version: \"$(grep -oE '\"hashtable_version\": \"[0-9]+\"' {params.ref}/info.json | grep -oE '[0-9]+' || echo NA)\""
+        }} > {output}
+        """
 
 
 # Merge kit + spike-in BEDs into a sorted, non-overlapping union.
@@ -110,22 +129,23 @@ rule dragen:
         """
 
 
-# Nirvana annotation of the hard-filtered VCF (GRCh38).
+# Nirvana annotation of the hard-filtered VCF (GRCh38), emitting an annotated VCF.
 rule nirvana:
     input:
         vcf=os.path.join(OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"),
     output:
-        json=os.path.join(OUTDIR, "{sample}", "{sample}.json.gz"),
+        vcf=os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
     params:
         bin=config["nirvana_bin"],
         cache=config["nirvana_cache"],
         dat=config["nirvana_dat"],
         sd=config["nirvana_sd"],
-        out_prefix=lambda wc: os.path.join(OUTDIR, wc.sample, wc.sample),
+        fmt=config["nirvana_output_format"],
+        out_prefix=lambda wc: os.path.join(OUTDIR, wc.sample, wc.sample + ".annotated"),
     shell:
         r"""
         {params.bin} -c {params.cache} -r {params.dat} --sd {params.sd} \
-            -i {input.vcf} -o {params.out_prefix}
+            --output-format {params.fmt} -i {input.vcf} -o {params.out_prefix}
         """
 
 

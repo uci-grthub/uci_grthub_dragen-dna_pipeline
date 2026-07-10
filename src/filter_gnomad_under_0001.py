@@ -12,41 +12,49 @@ json_path = Path(args.json_path)
 
 # Read Nirvana JSON output by lines
 
+# Nirvana / Illumina Connected Annotations writes a line-delimited JSON:
+#   line 1               {"header":{...},"positions":[
+#   position objects     {"chromosome":...},   (one per line, trailing comma)
+#   ]                     closes the positions array
+#   ,"genes":[            optional genes section (may be its own line or
+#                         concatenated as  ],"genes":[  )
+#   gene objects          {"name":...},
+#   ,"samples":[ / ]}     other sections we ignore
+# Section markers can appear standalone or fused onto a data line, so detect
+# them by substring rather than exact match.
 header = ''
 positions = []
 genes = []
-is_header_line = True
-is_position_line = False
-is_gene_line = False
-gene_section_line = '],"genes":['
-end_line = ']}'
+section = None  # 'positions' | 'genes' | None
 with gzip.open(json_path, 'rt') as f:
-    position_count = 0
-    gene_count = 0
     for line in f:
-        trim_line = line.strip()
-        if is_header_line:
-            ## only keep the "header" field content from the line
-            header = trim_line[10:-14]
-            is_header_line = False
-            is_position_line = True
+        t = line.strip()
+        if not t:
             continue
-        if trim_line == gene_section_line:
-            is_gene_line = True
-            is_position_line = False
+        if t.startswith('{"header":'):
+            # header object + opening of the positions array
+            head_part = t[:-len(',"positions":[')] if t.endswith(',"positions":[') else t
+            header = head_part[len('{"header":'):]
+            section = 'positions'
             continue
-        elif trim_line == end_line:
-            break
-        else:
-            if is_position_line:
-                ## remove the trailing ',' if there is
-                positions.append(trim_line.rstrip(','))
-                position_count += 1
-            if is_gene_line:
-                ## remove the trailing ',' if there is
-                genes.append(trim_line.rstrip(','))
-                gene_count += 1
+        # section-boundary lines (close an array and/or open the next one)
+        if t.startswith(']') or t.startswith(',"'):
+            if '"genes":[' in t:
+                section = 'genes'
+            elif '"positions":[' in t:
+                section = 'positions'
+            else:
+                section = None  # samples or final }
+            continue
+        # data line belonging to the current section
+        obj = t.rstrip(',')
+        if section == 'positions':
+            positions.append(obj)
+        elif section == 'genes':
+            genes.append(obj)
 
+position_count = len(positions)
+gene_count = len(genes)
 print('header object:', header)
 print('number of positions:', position_count)
 print('number of genes:', gene_count)
