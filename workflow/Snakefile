@@ -38,6 +38,8 @@ PANEL_JSON     = os.path.join(RESULTS, "annot", PANEL + "_sites.json.gz")
 PANEL_DB          = os.path.join(RESULTS, PANEL + "_variants.sqlite")
 PANEL_REPORT_MD   = os.path.join(RESULTS, PANEL + "_report.md")
 PANEL_REPORT      = os.path.join(RESULTS, PANEL + "_report.pdf")
+PIPELINE_REPORT_MD = os.path.join(RESULTS, "pipeline_report.md")
+PIPELINE_REPORT    = os.path.join(RESULTS, "pipeline_report.pdf")
 
 
 rule all:
@@ -48,6 +50,7 @@ rule all:
         PANEL_DB,
         PANEL_VCF,
         PANEL_REPORT,
+        PIPELINE_REPORT,
 
 
 # Record live tool/reference versions for provenance.
@@ -193,7 +196,7 @@ rule panel_bed:
     shell:
         r"""
         gawk -F'\t' -v PAD={params.pad} '
-            NR==FNR {{ if (FNR>1) g[$1]=1; next }}
+            NR==FNR {{ if ($1!~/^#/ && $1!="gene_symbol") g[$1]=1; next }}
             /^#/ {{ next }}
             $3=="gene" {{
                 name=$9; sub(/.*gene_name "/,"",name); sub(/".*/,"",name)
@@ -296,7 +299,7 @@ rule panel_db:
         # per-sample consequence rows (panel genes only, carriers only)
         bcftools +split-vep {input.vcf} -d \
             -f '[%CHROM\t%POS\t%REF\t%ALT\t%SAMPLE\t%GT\t%DP\t%GeneSymbol\t%GeneNcbiId\t%Feature\t%Canonical\t%Consequence\t%Impact\t%BioType\t%HGVSc\t%HGVSp\t%VariantId\n]' \
-          | awk -F'\t' 'NR==FNR {{ if (FNR>1) g[$1]=1; next }}
+          | awk -F'\t' 'NR==FNR {{ if ($1!~/^#/ && $1!="gene_symbol") g[$1]=1; next }}
                         $6 !~ /^(0[\/|]0|\.[\/|]\.|\.)$/ && ($8 in g)' \
                 {input.tsv} - > {params.vtsv}
 
@@ -364,6 +367,36 @@ rule panel_report:
     shell:
         r"""
         bash {input.script} {PANEL} {input.db} {input.json} {input.tsv} {output.md}
+        pandoc {output.md} -o {output.pdf} \
+            --pdf-engine=typst \
+            -V fontsize=10pt
+        """
+
+
+# Human-readable PDF describing the whole analysis pipeline: inputs, per-step
+# method, live tool/reference versions, and key outputs. Script emits Markdown;
+# pandoc (typst engine) renders it to PDF.
+rule pipeline_report:
+    input:
+        versions=os.path.join(OUTDIR, "versions.yaml"),
+        samples=config["samples_csv"],
+        script="src/make_pipeline_report.sh",
+    output:
+        pdf=PIPELINE_REPORT,
+        md=PIPELINE_REPORT_MD,
+    params:
+        outdir=OUTDIR,
+        target=TARGET_BED,
+        probe=PROBE_BED,
+        padding=config["target_padding"],
+        spike=config["with_spike_in"],
+        trim_q=config["trim_min_quality"],
+        trim_len=config["trim_min_length"],
+    shell:
+        r"""
+        bash {input.script} {params.outdir} {input.versions} {input.samples} \
+            {params.target} {params.probe} {params.padding} {params.spike} \
+            {params.trim_q} {params.trim_len} {PANEL} {output.md}
         pandoc {output.md} -o {output.pdf} \
             --pdf-engine=typst \
             -V fontsize=10pt
