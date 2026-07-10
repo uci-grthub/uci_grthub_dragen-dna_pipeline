@@ -70,9 +70,9 @@ DRY_RUN=false
 CREATE_ONLY=false
 # Nirvana annotation defaults (hg38 / GRCh38; override via environment if needed)
 NIRVANA_BIN="/opt/dragen/4.4.7/share/nirvana/Nirvana"
-NIRVANA_CACHE="/staging/human/reference/hg38/annotation_data_files/Cache/GRCh38"
+NIRVANA_CACHE="/staging/human/reference/hg38/annotation_data_files/Cache"
 NIRVANA_DAT="/staging/human/reference/hg38/annotation_data_files/References/Homo_sapiens.GRCh38.Nirvana.dat"
-NIRVANA_SD="/staging/human/reference/hg38/annotation_data_files/SupplementaryAnnotation/GRCh38_curated"
+NIRVANA_SD="/staging/human/reference/hg38/annotation_data_files/SupplementaryAnnotation/GRCh38_ica326"
 
 if [ $# -eq 0 ]; then
     usage

@@ -1,5 +1,8 @@
 results_old/
 results_second_run/
-*.tar.xz# pixi environments
+*.tar.xz
+# pixi environments
 .pixi/*
 !.pixi/config.toml
+# snakemake internal state
+.snakemake/

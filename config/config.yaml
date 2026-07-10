@@ -42,10 +42,14 @@ trim_min_length: 20
 #   "SNP filter:snp:QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0; INDEL filter:indel:QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"
 vc_filter: ""
 
-# Nirvana annotation (GRCh38).
+# Nirvana annotation (GRCh38). Cache dir is the parent Cache/ (holds the
+# ICA-3.26 GeneModels transcript cache: GRCh38.Ensembl.ndb / GRCh38.RefSeq.ndb
+# / GeneSymbols.ndb), NOT the legacy Cache/GRCh38/ (old Both.transcripts.ndb,
+# silently rejected by 3.26). SD points at GRCh38_ica326: newest-only symlinks
+# per source (no duplicate-key collisions from the mixed old/new SA dir).
 nirvana_bin:   "/opt/dragen/4.4.7/share/nirvana/Nirvana"
-nirvana_cache: "/staging/human/reference/hg38/annotation_data_files/Cache/GRCh38"
+nirvana_cache: "/staging/human/reference/hg38/annotation_data_files/Cache"
 nirvana_dat:   "/staging/human/reference/hg38/annotation_data_files/References/Homo_sapiens.GRCh38.Nirvana.dat"
-nirvana_sd:    "/staging/human/reference/hg38/annotation_data_files/SupplementaryAnnotation/GRCh38_curated"
+nirvana_sd:    "/staging/human/reference/hg38/annotation_data_files/SupplementaryAnnotation/GRCh38_ica326"
 # Nirvana output format: json or vcf. json and vcf are mutually exclusive per run.
 nirvana_output_format: "vcf"

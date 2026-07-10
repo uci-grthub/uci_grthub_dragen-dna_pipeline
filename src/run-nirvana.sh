@@ -28,9 +28,9 @@ EOF
 OUTPUT_BASE=""
 VCF_SUFFIX=".hard-filtered.vcf.gz"
 NIRVANA_BIN="/opt/dragen/4.4.7/share/nirvana/Nirvana"
-NIRVANA_CACHE="/staging/human/reference/hg38/annotation_data_files/Cache/GRCh38"
+NIRVANA_CACHE="/staging/human/reference/hg38/annotation_data_files/Cache"
 NIRVANA_DAT="/staging/human/reference/hg38/annotation_data_files/References/Homo_sapiens.GRCh38.Nirvana.dat"
-NIRVANA_SD="/staging/human/reference/hg38/annotation_data_files/SupplementaryAnnotation/GRCh38_curated"
+NIRVANA_SD="/staging/human/reference/hg38/annotation_data_files/SupplementaryAnnotation/GRCh38_ica326"
 OUTPUT_FORMAT="vcf"
 FORCE=false
 DRY_RUN=false
