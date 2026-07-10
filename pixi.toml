@@ -20,6 +20,8 @@ typst = "*"         # pandoc PDF engine (no LaTeX)
 [tasks]
 # regenerate the sample sheet from data/FASTQ
 samples = "bash src/make-sample-file.sh --abs --output data/samples.csv"
+# rebuild the sourced pain-gene panel (QuickGO GO terms + CPIC/PharmGKB PGx)
+pain-genes = "bash src/fetch_pain_genes.sh"
 # dry-run the workflow (no execution)
 dryrun = "snakemake -n --resources dragen=1"
 # run the full pipeline; DRAGEN serialized to one FPGA job at a time
