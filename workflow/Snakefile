@@ -35,8 +35,9 @@ PANEL_BED      = os.path.join(RESULTS, PANEL + "_genes.bed")
 PANEL_VCF      = os.path.join(RESULTS, PANEL + "_variants.vcf.gz")
 PANEL_SITES    = os.path.join(RESULTS, "annot", PANEL + "_sites.vcf.gz")
 PANEL_JSON     = os.path.join(RESULTS, "annot", PANEL + "_sites.json.gz")
-PANEL_DB       = os.path.join(RESULTS, PANEL + "_variants.sqlite")
-PANEL_REPORT   = os.path.join(RESULTS, PANEL + "_report.md")
+PANEL_DB          = os.path.join(RESULTS, PANEL + "_variants.sqlite")
+PANEL_REPORT_MD   = os.path.join(RESULTS, PANEL + "_report.md")
+PANEL_REPORT      = os.path.join(RESULTS, PANEL + "_report.pdf")
 
 
 rule all:
@@ -348,8 +349,9 @@ SQL
         """
 
 
-# Human-readable Markdown report: overview, live summary stats, pipeline steps,
-# and a column dictionary explaining every DB field / annotation.
+# Human-readable PDF report: overview, live summary stats, pipeline steps,
+# and a column dictionary explaining every DB field / annotation. The script
+# emits Markdown; pandoc (wkhtmltopdf engine, no LaTeX) renders it to PDF.
 rule panel_report:
     input:
         db=PANEL_DB,
@@ -357,8 +359,12 @@ rule panel_report:
         tsv=config["panel_tsv"],
         script="src/make_panel_report.sh",
     output:
-        md=PANEL_REPORT,
+        pdf=PANEL_REPORT,
+        md=PANEL_REPORT_MD,
     shell:
         r"""
         bash {input.script} {PANEL} {input.db} {input.json} {input.tsv} {output.md}
+        pandoc {output.md} -o {output.pdf} \
+            --pdf-engine=typst \
+            -V fontsize=10pt
         """

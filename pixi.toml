@@ -14,6 +14,8 @@ htslib = "*"        # bgzip + tabix
 gawk = "*"          # portable awk for GTF parsing
 sqlite = "*"        # gene-panel variant DB
 jq = "*"            # parse Nirvana JSON annotations
+pandoc = "*"        # render panel report md -> pdf
+typst = "*"         # pandoc PDF engine (no LaTeX)
 
 [tasks]
 # regenerate the sample sheet from data/FASTQ
