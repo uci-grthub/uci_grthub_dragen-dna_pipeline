@@ -1,0 +1,47 @@
+gene_symbol	hgnc_id	ensembl_gene_id	category	description
+SCN9A	HGNC:10597	ENSG00000169432	ion_channel	Nav1.7 sodium channel; gain-of-function causes erythromelalgia/paroxysmal extreme pain, loss-of-function causes congenital insensitivity to pain
+SCN10A	HGNC:10582	ENSG00000185313	ion_channel	Nav1.8 sodium channel; peripheral pain signaling, small-fiber neuropathy
+SCN11A	HGNC:10583	ENSG00000168356	ion_channel	Nav1.9 sodium channel; congenital insensitivity to pain and painful neuropathy
+SCN8A	HGNC:10596	ENSG00000196876	ion_channel	Nav1.6 sodium channel; nociceptor excitability
+TRPV1	HGNC:12716	ENSG00000196689	ion_channel	Capsaicin/heat receptor; thermal and inflammatory nociception
+TRPA1	HGNC:497	ENSG00000104321	ion_channel	Chemosensory nociceptor channel; cold and irritant pain
+TRPM8	HGNC:17961	ENSG00000144481	ion_channel	Cold/menthol receptor; cold pain sensation
+CACNA1A	HGNC:1388	ENSG00000141837	ion_channel	P/Q-type calcium channel; migraine (familial hemiplegic migraine type 1)
+CACNA1B	HGNC:1389	ENSG00000148408	ion_channel	N-type calcium channel (Cav2.2); target of ziconotide analgesic
+CACNA2D1	HGNC:1399	ENSG00000153956	ion_channel	Calcium channel subunit; gabapentin/pregabalin target
+KCNQ2	HGNC:6296	ENSG00000075043	ion_channel	Kv7.2 potassium channel; neuronal excitability, retigabine target
+KCNS1	HGNC:6300	ENSG00000124134	ion_channel	Potassium channel subunit; chronic pain susceptibility
+OPRM1	HGNC:8156	ENSG00000112038	receptor	Mu-opioid receptor; primary target of morphine and opioid analgesics
+OPRD1	HGNC:8153	ENSG00000116329	receptor	Delta-opioid receptor; analgesia modulation
+OPRK1	HGNC:8154	ENSG00000082556	receptor	Kappa-opioid receptor; analgesia and dysphoria
+OPRL1	HGNC:8155	ENSG00000125510	receptor	Nociceptin/orphanin FQ receptor; pain modulation
+CNR1	HGNC:2159	ENSG00000118432	receptor	Cannabinoid receptor 1; endocannabinoid analgesia
+CNR2	HGNC:2160	ENSG00000188822	receptor	Cannabinoid receptor 2; inflammatory and neuropathic pain
+P2RX3	HGNC:8535	ENSG00000109991	receptor	ATP-gated purinergic receptor; nociceptor sensitization
+P2RX7	HGNC:8537	ENSG00000089041	receptor	Purinergic receptor; neuroinflammatory pain
+NTRK1	HGNC:8031	ENSG00000198400	receptor	TrkA/NGF receptor; congenital insensitivity to pain with anhidrosis (CIPA)
+NGF	HGNC:7808	ENSG00000134259	growth_factor	Nerve growth factor; hereditary sensory autonomic neuropathy type 5, pain signaling
+BDNF	HGNC:1033	ENSG00000176697	growth_factor	Brain-derived neurotrophic factor; central sensitization
+GCH1	HGNC:4193	ENSG00000131979	metabolism	GTP cyclohydrolase; BH4 pathway, pain sensitivity haplotype
+COMT	HGNC:2228	ENSG00000093010	metabolism	Catechol-O-methyltransferase; pain sensitivity and opioid response
+CYP2D6	HGNC:2625	ENSG00000100197	metabolism	Cytochrome P450; codeine/tramadol/opioid metabolism (pharmacogenomics)
+CYP2C9	HGNC:2623	ENSG00000138109	metabolism	Cytochrome P450; NSAID metabolism
+UGT2B7	HGNC:12554	ENSG00000171234	metabolism	Morphine glucuronidation
+FAAH	HGNC:3553	ENSG00000117480	metabolism	Fatty acid amide hydrolase; endocannabinoid degradation, pain threshold
+ABCB1	HGNC:40	ENSG00000085563	transport	P-glycoprotein; opioid transport across blood-brain barrier
+PTGS1	HGNC:9604	ENSG00000095303	inflammation	COX-1; prostaglandin synthesis, NSAID target
+PTGS2	HGNC:9605	ENSG00000073756	inflammation	COX-2; inflammatory pain, NSAID/coxib target
+TNF	HGNC:11892	ENSG00000232810	inflammation	Tumor necrosis factor alpha; inflammatory and neuropathic pain
+IL6	HGNC:6018	ENSG00000136244	inflammation	Interleukin-6; inflammatory pain and central sensitization
+IL1B	HGNC:5992	ENSG00000125538	inflammation	Interleukin-1 beta; nociceptor sensitization
+NGFR	HGNC:7809	ENSG00000064300	receptor	p75 neurotrophin receptor; pain and neuronal survival
+GLRA3	HGNC:4328	ENSG00000145451	ion_channel	Glycine receptor alpha3; spinal inflammatory pain
+GABRA2	HGNC:4076	ENSG00000151834	receptor	GABA-A receptor subunit; spinal pain inhibition
+ADRB2	HGNC:286	ENSG00000169252	receptor	Beta-2 adrenergic receptor; pain modulation and COMT interaction
+MC1R	HGNC:6929	ENSG00000258839	receptor	Melanocortin-1 receptor; kappa-opioid analgesia, sex-specific pain
+TAC1	HGNC:11517	ENSG00000006128	neuropeptide	Substance P/tachykinin precursor; nociceptive transmission
+CALCA	HGNC:1437	ENSG00000110680	neuropeptide	CGRP; migraine and inflammatory pain, CGRP-antagonist target
+PRDM12	HGNC:13998	ENSG00000130711	transcription	Congenital insensitivity to pain (hereditary sensory autonomic neuropathy type 8)
+CLTCL1	HGNC:2093	ENSG00000070371	other	Congenital insensitivity to pain association
+FGF13	HGNC:3670	ENSG00000129682	ion_channel	Nav channel modulator; nociceptor heat sensitivity
+ZFHX2	HGNC:18092	ENSG00000136367	transcription	Marsili syndrome; congenital pain insensitivity

@@ -13,6 +13,7 @@ bcftools = "*"
 htslib = "*"        # bgzip + tabix
 gawk = "*"          # portable awk for GTF parsing
 sqlite = "*"        # gene-panel variant DB
+jq = "*"            # parse Nirvana JSON annotations
 
 [tasks]
 # regenerate the sample sheet from data/FASTQ

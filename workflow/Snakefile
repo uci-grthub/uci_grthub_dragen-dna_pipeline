@@ -29,11 +29,14 @@ else:
     PROBE_BED  = config["probe_bed"]
 
 # ---- gene-panel variant extraction paths ----
-PANEL      = config["panel_name"]
-RESULTS    = "results"
-PANEL_BED  = os.path.join(RESULTS, PANEL + "_genes.bed")
-PANEL_VCF  = os.path.join(RESULTS, PANEL + "_variants.vcf.gz")
-PANEL_DB   = os.path.join(RESULTS, PANEL + "_variants.sqlite")
+PANEL          = config["panel_name"]
+RESULTS        = "results"
+PANEL_BED      = os.path.join(RESULTS, PANEL + "_genes.bed")
+PANEL_VCF      = os.path.join(RESULTS, PANEL + "_variants.vcf.gz")
+PANEL_SITES    = os.path.join(RESULTS, "annot", PANEL + "_sites.vcf.gz")
+PANEL_JSON     = os.path.join(RESULTS, "annot", PANEL + "_sites.json.gz")
+PANEL_DB       = os.path.join(RESULTS, PANEL + "_variants.sqlite")
+PANEL_REPORT   = os.path.join(RESULTS, PANEL + "_report.md")
 
 
 rule all:
@@ -43,6 +46,7 @@ rule all:
         expand(os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"), sample=SAMPLES),
         PANEL_DB,
         PANEL_VCF,
+        PANEL_REPORT,
 
 
 # Record live tool/reference versions for provenance.
@@ -236,36 +240,125 @@ rule panel_merge:
         """
 
 
-# Flatten CSQ annotations x per-sample genotypes into a queryable SQLite table.
-# One row per (variant, transcript-consequence, carrier sample). Hom-ref and
-# missing genotypes are dropped.
+# Sites-only VCF (drop genotypes) — the annotation payload is sample-independent,
+# so we annotate the ~unique panel sites once instead of per sample.
+rule panel_sites:
+    input:
+        vcf=PANEL_VCF,
+    output:
+        vcf=PANEL_SITES,
+    shell:
+        r"""
+        bcftools view -G {input.vcf} -Oz -o {output.vcf}
+        """
+
+
+# Nirvana JSON annotation of the panel sites (gnomAD, ClinVar, dbSNP, REVEL,
+# phyloP, ...). json/vcf are mutually exclusive per Nirvana run, hence a
+# separate pass from the per-sample `nirvana` rule.
+rule panel_annotate:
+    input:
+        vcf=PANEL_SITES,
+    output:
+        json=PANEL_JSON,
+    params:
+        bin=config["nirvana_bin"],
+        cache=config["nirvana_cache"],
+        dat=config["nirvana_dat"],
+        sd=config["nirvana_sd"],
+        out_prefix=os.path.join(RESULTS, "annot", PANEL + "_sites"),
+    shell:
+        r"""
+        {params.bin} -c {params.cache} -r {params.dat} --sd {params.sd} \
+            --output-format json -i {input.vcf} -o {params.out_prefix}
+        """
+
+
+# Build the queryable SQLite DB:
+#   panel_variants        - one row per (variant, transcript-consequence, carrier
+#                           sample); hom-ref/missing genotypes dropped.
+#   variant_annotations   - one row per variant (vid): gnomAD AF, ClinVar, dbSNP,
+#                           REVEL, phyloP.
+#   panel_annotated (view)- panel_variants LEFT JOIN annotations on variant_id.
 rule panel_db:
     input:
         vcf=PANEL_VCF,
+        json=PANEL_JSON,
         tsv=config["panel_tsv"],
     output:
         db=PANEL_DB,
     params:
-        tsv=os.path.join(RESULTS, PANEL + "_variants.tsv"),
+        vtsv=os.path.join(RESULTS, PANEL + "_variants.tsv"),
+        atsv=os.path.join(RESULTS, "annot", PANEL + "_annotations.tsv"),
     shell:
         r"""
+        # per-sample consequence rows (panel genes only, carriers only)
         bcftools +split-vep {input.vcf} -d \
-            -f '[%CHROM\t%POS\t%REF\t%ALT\t%SAMPLE\t%GT\t%DP\t%GeneSymbol\t%GeneNcbiId\t%Feature\t%Canonical\t%Consequence\t%Impact\t%BioType\t%HGVSc\t%HGVSp\n]' \
+            -f '[%CHROM\t%POS\t%REF\t%ALT\t%SAMPLE\t%GT\t%DP\t%GeneSymbol\t%GeneNcbiId\t%Feature\t%Canonical\t%Consequence\t%Impact\t%BioType\t%HGVSc\t%HGVSp\t%VariantId\n]' \
           | awk -F'\t' 'NR==FNR {{ if (FNR>1) g[$1]=1; next }}
                         $6 !~ /^(0[\/|]0|\.[\/|]\.|\.)$/ && ($8 in g)' \
-                {input.tsv} - > {params.tsv}
+                {input.tsv} - > {params.vtsv}
+
+        # site-level annotations keyed by vid (== CSQ VariantId)
+        zcat {input.json} | jq -r '
+            .positions[].variants[]
+            | [ .vid,
+                (.dbsnp // [] | join(",")),
+                (.gnomad.allAf // ""),
+                (.gnomad.allHc // ""),
+                ([.clinvar[]?.classifications.germlineClassification.classification]
+                    | map(select(.)) | unique | join(";")),
+                ([.clinvar[]?.classifications.germlineClassification.reviewStatus]
+                    | map(select(.)) | unique | join(";")),
+                ([.clinvar[]?.classifications.germlineClassification.conditions[]?.traits[]?.name.value]
+                    | map(select(. and . != "not provided")) | unique | join(";")),
+                (.revel.score // ""),
+                (.phylopScore // "")
+              ] | @tsv' \
+          | awk -F'\t' '!seen[$1]++' > {params.atsv}
+
         rm -f {output.db}
         sqlite3 {output.db} <<'SQL'
 CREATE TABLE panel_variants(
   chrom TEXT, pos INTEGER, ref TEXT, alt TEXT,
   sample TEXT, gt TEXT, dp INTEGER,
   gene_symbol TEXT, gene_ncbi_id TEXT, feature TEXT, canonical TEXT,
-  consequence TEXT, impact TEXT, biotype TEXT, hgvsc TEXT, hgvsp TEXT
+  consequence TEXT, impact TEXT, biotype TEXT, hgvsc TEXT, hgvsp TEXT,
+  variant_id TEXT
+);
+CREATE TABLE variant_annotations(
+  variant_id TEXT PRIMARY KEY, rsid TEXT, gnomad_af REAL, gnomad_hom INTEGER,
+  clinvar_significance TEXT, clinvar_review TEXT, clinvar_conditions TEXT,
+  revel REAL, phylop REAL
 );
 .mode tabs
-.import {params.tsv} panel_variants
+.import {params.vtsv} panel_variants
+.import {params.atsv} variant_annotations
 CREATE INDEX idx_gene   ON panel_variants(gene_symbol);
 CREATE INDEX idx_sample ON panel_variants(sample);
 CREATE INDEX idx_impact ON panel_variants(impact);
+CREATE INDEX idx_vid    ON panel_variants(variant_id);
+CREATE VIEW panel_annotated AS
+  SELECT v.*, a.rsid, a.gnomad_af, a.gnomad_hom,
+         a.clinvar_significance, a.clinvar_review, a.clinvar_conditions,
+         a.revel, a.phylop
+  FROM panel_variants v
+  LEFT JOIN variant_annotations a USING(variant_id);
 SQL
+        """
+
+
+# Human-readable Markdown report: overview, live summary stats, pipeline steps,
+# and a column dictionary explaining every DB field / annotation.
+rule panel_report:
+    input:
+        db=PANEL_DB,
+        json=PANEL_JSON,
+        tsv=config["panel_tsv"],
+        script="src/make_panel_report.sh",
+    output:
+        md=PANEL_REPORT,
+    shell:
+        r"""
+        bash {input.script} {PANEL} {input.db} {input.json} {input.tsv} {output.md}
         """

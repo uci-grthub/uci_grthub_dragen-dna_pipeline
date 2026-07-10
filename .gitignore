@@ -1,5 +1,7 @@
 results_old/
 results_second_run/
+# generated panel outputs (VCF/DB/BED/report/annotations)
+results/
 *.tar.xz
 # pixi environments
 .pixi/*
