@@ -28,12 +28,21 @@ else:
     TARGET_BED = config["target_bed"]
     PROBE_BED  = config["probe_bed"]
 
+# ---- gene-panel variant extraction paths ----
+PANEL      = config["panel_name"]
+RESULTS    = "results"
+PANEL_BED  = os.path.join(RESULTS, PANEL + "_genes.bed")
+PANEL_VCF  = os.path.join(RESULTS, PANEL + "_variants.vcf.gz")
+PANEL_DB   = os.path.join(RESULTS, PANEL + "_variants.sqlite")
+
 
 rule all:
     input:
         os.path.join(OUTDIR, "versions.yaml"),
         os.path.join(OUTDIR, "multiqc", "multiqc_report.html"),
         expand(os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"), sample=SAMPLES),
+        PANEL_DB,
+        PANEL_VCF,
 
 
 # Record live tool/reference versions for provenance.
@@ -161,4 +170,102 @@ rule multiqc:
     shell:
         r"""
         multiqc {params.scan} -o {params.outdir} -n multiqc_report.html -f
+        """
+
+
+# ---- Gene-panel variant extraction (e.g. pain genes) ----
+
+# Look up panel symbols (col1 of panel_tsv) in the GENCODE GTF, emit a padded,
+# sorted, merged coordinate BED. Contigs are chr-prefixed (match the VCFs).
+rule panel_bed:
+    input:
+        gtf=config["gene_gtf"],
+        tsv=config["panel_tsv"],
+    output:
+        bed=PANEL_BED,
+    params:
+        pad=config["panel_gene_padding"],
+    shell:
+        r"""
+        gawk -F'\t' -v PAD={params.pad} '
+            NR==FNR {{ if (FNR>1) g[$1]=1; next }}
+            /^#/ {{ next }}
+            $3=="gene" {{
+                name=$9; sub(/.*gene_name "/,"",name); sub(/".*/,"",name)
+                if (name in g) {{
+                    s=$4-1-PAD; if (s<0) s=0; e=$5+PAD
+                    print $1"\t"s"\t"e"\t"name
+                }}
+            }}' {input.tsv} <(zcat {input.gtf}) \
+          | sort -k1,1 -k2,2n \
+          | bedtools merge -i - > {output.bed}
+        test -s {output.bed}
+        """
+
+
+# Subset one sample's annotated VCF to the panel regions. -T streams (no index
+# on the input needed); the annotated VCFs ship without a .tbi.
+rule panel_subset:
+    input:
+        vcf=os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
+        bed=PANEL_BED,
+    output:
+        vcf=os.path.join(RESULTS, "panel_subsets", "{sample}." + PANEL + ".vcf.gz"),
+        tbi=os.path.join(RESULTS, "panel_subsets", "{sample}." + PANEL + ".vcf.gz.tbi"),
+    shell:
+        r"""
+        bcftools view -T {input.bed} {input.vcf} -Oz -o {output.vcf}
+        tabix -f -p vcf {output.vcf}
+        """
+
+
+# Merge per-sample panel subsets into one multi-sample VCF.
+rule panel_merge:
+    input:
+        vcfs=expand(
+            os.path.join(RESULTS, "panel_subsets", "{sample}." + PANEL + ".vcf.gz"),
+            sample=SAMPLES,
+        ),
+    output:
+        vcf=PANEL_VCF,
+        tbi=PANEL_VCF + ".tbi",
+    shell:
+        r"""
+        bcftools merge -Oz -o {output.vcf} {input.vcfs}
+        tabix -f -p vcf {output.vcf}
+        """
+
+
+# Flatten CSQ annotations x per-sample genotypes into a queryable SQLite table.
+# One row per (variant, transcript-consequence, carrier sample). Hom-ref and
+# missing genotypes are dropped.
+rule panel_db:
+    input:
+        vcf=PANEL_VCF,
+        tsv=config["panel_tsv"],
+    output:
+        db=PANEL_DB,
+    params:
+        tsv=os.path.join(RESULTS, PANEL + "_variants.tsv"),
+    shell:
+        r"""
+        bcftools +split-vep {input.vcf} -d \
+            -f '[%CHROM\t%POS\t%REF\t%ALT\t%SAMPLE\t%GT\t%DP\t%GeneSymbol\t%GeneNcbiId\t%Feature\t%Canonical\t%Consequence\t%Impact\t%BioType\t%HGVSc\t%HGVSp\n]' \
+          | awk -F'\t' 'NR==FNR {{ if (FNR>1) g[$1]=1; next }}
+                        $6 !~ /^(0[\/|]0|\.[\/|]\.|\.)$/ && ($8 in g)' \
+                {input.tsv} - > {params.tsv}
+        rm -f {output.db}
+        sqlite3 {output.db} <<'SQL'
+CREATE TABLE panel_variants(
+  chrom TEXT, pos INTEGER, ref TEXT, alt TEXT,
+  sample TEXT, gt TEXT, dp INTEGER,
+  gene_symbol TEXT, gene_ncbi_id TEXT, feature TEXT, canonical TEXT,
+  consequence TEXT, impact TEXT, biotype TEXT, hgvsc TEXT, hgvsp TEXT
+);
+.mode tabs
+.import {params.tsv} panel_variants
+CREATE INDEX idx_gene   ON panel_variants(gene_symbol);
+CREATE INDEX idx_sample ON panel_variants(sample);
+CREATE INDEX idx_impact ON panel_variants(impact);
+SQL
         """

@@ -9,6 +9,10 @@ version = "0.1.0"
 snakemake-minimal = ">=8"
 multiqc = "*"
 bedtools = "*"
+bcftools = "*"
+htslib = "*"        # bgzip + tabix
+gawk = "*"          # portable awk for GTF parsing
+sqlite = "*"        # gene-panel variant DB
 
 [tasks]
 # regenerate the sample sheet from data/FASTQ

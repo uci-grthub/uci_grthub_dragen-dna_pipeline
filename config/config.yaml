@@ -18,6 +18,18 @@ dragen_bin: "/opt/dragen/4.4.7/bin/dragen"
 reference: "/staging/human/reference/hg38/pangenome_reference"
 rgid: "Illumina_RGID"
 
+# Gene annotation GTF (GENCODE v47, GRCh38, chr-prefixed contigs — matches the
+# VCF/BAM contig naming). Used to convert gene symbols to coordinate BEDs
+# (e.g. data/pain_genes.tsv -> gene-panel variant extraction).
+gene_gtf: "/staging/human/reference/hg38/gencode/gencode.v47.primary_assembly.annotation.gtf.gz"
+
+# Gene-panel variant extraction. Symbols in <panel_tsv> col1 are looked up in
+# gene_gtf -> coordinate BED, used to subset each sample's annotated VCF, then
+# merged across samples into a multi-sample VCF + a queryable SQLite DB.
+panel_tsv: "data/pain_genes.tsv"
+panel_name: "pain"          # basename for results/<panel_name>_variants.*
+panel_gene_padding: 0       # bases added each side of each gene interval
+
 # Exome capture BEDs — IDT xGen Exome Research Panel v2 (hg38).
 target_bed: "/staging/human/reference/hg38/exome_beds/idt_x_gen_exome_research_panel_v2/xgen-exome-hyb-panel-v2-targets-hg38.bed"
 probe_bed:  "/staging/human/reference/hg38/exome_beds/idt_x_gen_exome_research_panel_v2/xgen-exome-hyb-panel-v2-probes-hg38.bed"
