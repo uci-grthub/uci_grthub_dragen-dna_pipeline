@@ -3,6 +3,8 @@ import os
 configfile: "config/config.yaml"
 
 OUTDIR = config["outdir"]
+LOGDIR = os.path.join(OUTDIR, "logs")
+BENCHDIR = os.path.join(OUTDIR, "benchmarks")
 
 # ---- load sample sheet (sample,R1,R2; # comments ignored) ----
 SAMPLES = {}
@@ -36,6 +38,7 @@ PANEL_VCF      = os.path.join(RESULTS, PANEL + "_variants.vcf.gz")
 PANEL_SITES    = os.path.join(RESULTS, "annot", PANEL + "_sites.vcf.gz")
 PANEL_JSON     = os.path.join(RESULTS, "annot", PANEL + "_sites.json.gz")
 PANEL_DB          = os.path.join(RESULTS, PANEL + "_variants.sqlite")
+PANEL_XLSX        = os.path.join(RESULTS, PANEL + "_variants.xlsx")
 PANEL_REPORT_MD   = os.path.join(RESULTS, PANEL + "_report.md")
 PANEL_REPORT      = os.path.join(RESULTS, PANEL + "_report.pdf")
 PIPELINE_REPORT_MD = os.path.join(RESULTS, "pipeline_report.md")
@@ -48,6 +51,7 @@ rule all:
         os.path.join(OUTDIR, "multiqc", "multiqc_report.html"),
         expand(os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"), sample=SAMPLES),
         PANEL_DB,
+        PANEL_XLSX,
         PANEL_VCF,
         PANEL_REPORT,
         PIPELINE_REPORT,
@@ -61,8 +65,13 @@ rule versions:
         dragen=config["dragen_bin"],
         nirvana=config["nirvana_bin"],
         ref=config["reference"],
+    log:
+        os.path.join(LOGDIR, "versions.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "versions.tsv")
     shell:
         r"""
+        exec 2> {log}
         {{
           echo "dragen: \"$({params.dragen} --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')\""
           echo "ica: \"$({params.nirvana} --version 2>&1 | grep -oiE 'Annotations [0-9.]+' | grep -oE '[0-9.]+')\""
@@ -81,8 +90,13 @@ rule merge_beds:
     output:
         t=os.path.join(OUTDIR, "combined-targets-hg38.bed"),
         p=os.path.join(OUTDIR, "combined-probes-hg38.bed"),
+    log:
+        os.path.join(LOGDIR, "merge_beds.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "merge_beds.tsv")
     shell:
         r"""
+        exec 2> {log}
         cat {input.kit_t} {input.spk_t} | cut -f1-3 | sort -k1,1 -k2,2n | bedtools merge -i - > {output.t}
         cat {input.kit_p} {input.spk_p} | cut -f1-3 | sort -k1,1 -k2,2n | bedtools merge -i - > {output.p}
         """
@@ -112,8 +126,13 @@ rule dragen:
         outdir=lambda wc: os.path.join(OUTDIR, wc.sample),
     resources:
         dragen=1,
+    log:
+        os.path.join(LOGDIR, "dragen", "{sample}.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "dragen", "{sample}.tsv")
     shell:
         r"""
+        exec 2> {log}
         filter_arg=()
         if [ -n "{params.vc_filter}" ]; then
             filter_arg=(--vc-hard-filter "{params.vc_filter}")
@@ -159,8 +178,13 @@ rule nirvana:
         sd=config["nirvana_sd"],
         fmt=config["nirvana_output_format"],
         out_prefix=lambda wc: os.path.join(OUTDIR, wc.sample, wc.sample + ".annotated"),
+    log:
+        os.path.join(LOGDIR, "nirvana", "{sample}.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "nirvana", "{sample}.tsv")
     shell:
         r"""
+        exec 2> {log}
         {params.bin} -c {params.cache} -r {params.dat} --sd {params.sd} \
             --output-format {params.fmt} -i {input.vcf} -o {params.out_prefix}
         """
@@ -169,34 +193,51 @@ rule nirvana:
 # Aggregate all DRAGEN QC into a single MultiQC report.
 rule multiqc:
     input:
-        expand(os.path.join(OUTDIR, "{sample}", "{sample}.bam"), sample=SAMPLES),
+        bams=expand(os.path.join(OUTDIR, "{sample}", "{sample}.bam"), sample=SAMPLES),
+        cfg="config/multiqc_config.yaml",
     output:
         os.path.join(OUTDIR, "multiqc", "multiqc_report.html"),
     params:
         scan=OUTDIR,
         outdir=os.path.join(OUTDIR, "multiqc"),
+    log:
+        os.path.join(LOGDIR, "multiqc.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "multiqc.tsv")
     shell:
         r"""
-        multiqc {params.scan} -o {params.outdir} -n multiqc_report.html -f
+        exec 2> {log}
+        multiqc {params.scan} -c {input.cfg} -o {params.outdir} -n multiqc_report.html -f
         """
 
 
 # ---- Gene-panel variant extraction (e.g. pain genes) ----
 
-# Look up panel symbols (col1 of panel_tsv) in the GENCODE GTF, emit a padded,
+# Look up panel symbols (col1 of panel_csv) in the GENCODE GTF, emit a padded,
 # sorted, merged coordinate BED. Contigs are chr-prefixed (match the VCFs).
+# The panel is a CSV whose later columns may be quoted and contain commas, so the
+# gene set is taken by splitting each line on "," and keeping field 1 only.
 rule panel_bed:
     input:
         gtf=config["gene_gtf"],
-        tsv=config["panel_tsv"],
+        csv=config["panel_csv"],
     output:
         bed=PANEL_BED,
     params:
         pad=config["panel_gene_padding"],
+    log:
+        os.path.join(LOGDIR, "panel_bed.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "panel_bed.tsv")
     shell:
         r"""
+        exec 2> {log}
         gawk -F'\t' -v PAD={params.pad} '
-            NR==FNR {{ if ($1!~/^#/ && $1!="gene_symbol") g[$1]=1; next }}
+            NR==FNR {{
+                sub(/\r$/,""); split($0, c, ",")
+                if (c[1]!="" && c[1]!~/^#/ && c[1]!="gene_symbol") g[c[1]]=1
+                next
+            }}
             /^#/ {{ next }}
             $3=="gene" {{
                 name=$9; sub(/.*gene_name "/,"",name); sub(/".*/,"",name)
@@ -204,7 +245,7 @@ rule panel_bed:
                     s=$4-1-PAD; if (s<0) s=0; e=$5+PAD
                     print $1"\t"s"\t"e"\t"name
                 }}
-            }}' {input.tsv} <(zcat {input.gtf}) \
+            }}' {input.csv} <(zcat {input.gtf}) \
           | sort -k1,1 -k2,2n \
           | bedtools merge -i - > {output.bed}
         test -s {output.bed}
@@ -220,8 +261,13 @@ rule panel_subset:
     output:
         vcf=os.path.join(RESULTS, "panel_subsets", "{sample}." + PANEL + ".vcf.gz"),
         tbi=os.path.join(RESULTS, "panel_subsets", "{sample}." + PANEL + ".vcf.gz.tbi"),
+    log:
+        os.path.join(LOGDIR, "panel_subset", "{sample}.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "panel_subset", "{sample}.tsv")
     shell:
         r"""
+        exec 2> {log}
         bcftools view -T {input.bed} {input.vcf} -Oz -o {output.vcf}
         tabix -f -p vcf {output.vcf}
         """
@@ -237,8 +283,13 @@ rule panel_merge:
     output:
         vcf=PANEL_VCF,
         tbi=PANEL_VCF + ".tbi",
+    log:
+        os.path.join(LOGDIR, "panel_merge.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "panel_merge.tsv")
     shell:
         r"""
+        exec 2> {log}
         bcftools merge -Oz -o {output.vcf} {input.vcfs}
         tabix -f -p vcf {output.vcf}
         """
@@ -251,8 +302,13 @@ rule panel_sites:
         vcf=PANEL_VCF,
     output:
         vcf=PANEL_SITES,
+    log:
+        os.path.join(LOGDIR, "panel_sites.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "panel_sites.tsv")
     shell:
         r"""
+        exec 2> {log}
         bcftools view -G {input.vcf} -Oz -o {output.vcf}
         """
 
@@ -271,8 +327,13 @@ rule panel_annotate:
         dat=config["nirvana_dat"],
         sd=config["nirvana_sd"],
         out_prefix=os.path.join(RESULTS, "annot", PANEL + "_sites"),
+    log:
+        os.path.join(LOGDIR, "panel_annotate.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "panel_annotate.tsv")
     shell:
         r"""
+        exec 2> {log}
         {params.bin} -c {params.cache} -r {params.dat} --sd {params.sd} \
             --output-format json -i {input.vcf} -o {params.out_prefix}
         """
@@ -283,25 +344,47 @@ rule panel_annotate:
 #                           sample); hom-ref/missing genotypes dropped.
 #   variant_annotations   - one row per variant (vid): gnomAD AF, ClinVar, dbSNP,
 #                           REVEL, phyloP.
-#   panel_annotated (view)- panel_variants LEFT JOIN annotations on variant_id.
+#   panel_genes           - the curated panel CSV verbatim (category, priority,
+#                           mechanism, key_variants, exome_capture_note).
+#   panel_key_variants    - (gene, rsID) pairs parsed from key_variants; lets the
+#                           cohort be matched against the a-priori variants by rsID.
+#   panel_annotated (view)- panel_variants + annotations + gene metadata, with an
+#                           is_key_variant flag.
+#   key_variant_status    - one row per a-priori rsID: called or not, carrier counts.
+#   key_variant_carriers  - the actual carrier rows for a-priori variants.
 rule panel_db:
     input:
         vcf=PANEL_VCF,
         json=PANEL_JSON,
-        tsv=config["panel_tsv"],
+        csv=config["panel_csv"],
+        script="src/panel_tables.py",
     output:
         db=PANEL_DB,
     params:
         vtsv=os.path.join(RESULTS, PANEL + "_variants.tsv"),
         atsv=os.path.join(RESULTS, "annot", PANEL + "_annotations.tsv"),
+        gtsv=os.path.join(RESULTS, "annot", PANEL + "_genes.tsv"),
+        ktsv=os.path.join(RESULTS, "annot", PANEL + "_key_variants.tsv"),
+    log:
+        os.path.join(LOGDIR, "panel_db.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "panel_db.tsv")
     shell:
         r"""
+        exec 2> {log}
+        # panel metadata + a-priori (gene, rsID) pairs from the curated CSV
+        python3 {input.script} {input.csv} {params.gtsv} {params.ktsv}
+
         # per-sample consequence rows (panel genes only, carriers only)
         bcftools +split-vep {input.vcf} -d \
             -f '[%CHROM\t%POS\t%REF\t%ALT\t%SAMPLE\t%GT\t%DP\t%GeneSymbol\t%GeneNcbiId\t%Feature\t%Canonical\t%Consequence\t%Impact\t%BioType\t%HGVSc\t%HGVSp\t%VariantId\n]' \
-          | awk -F'\t' 'NR==FNR {{ if ($1!~/^#/ && $1!="gene_symbol") g[$1]=1; next }}
+          | awk -F'\t' 'NR==FNR {{
+                          sub(/\r$/,""); split($0, c, ",")
+                          if (c[1]!="" && c[1]!~/^#/ && c[1]!="gene_symbol") g[c[1]]=1
+                          next
+                        }}
                         $6 !~ /^(0[\/|]0|\.[\/|]\.|\.)$/ && ($8 in g)' \
-                {input.tsv} - > {params.vtsv}
+                {input.csv} - > {params.vtsv}
 
         # site-level annotations keyed by vid (== CSQ VariantId)
         zcat {input.json} | jq -r '
@@ -335,20 +418,99 @@ CREATE TABLE variant_annotations(
   clinvar_significance TEXT, clinvar_review TEXT, clinvar_conditions TEXT,
   revel REAL, phylop REAL
 );
+CREATE TABLE panel_genes(
+  gene_symbol TEXT PRIMARY KEY, ensembl_gene_id TEXT, category TEXT, priority TEXT,
+  mechanism TEXT, key_variants TEXT, evidence_note TEXT, exome_capture_note TEXT
+);
+CREATE TABLE panel_key_variants(
+  gene_symbol TEXT, key_rsid TEXT, key_variant_note TEXT
+);
 .mode tabs
 .import {params.vtsv} panel_variants
 .import {params.atsv} variant_annotations
+.import {params.gtsv} panel_genes
+.import {params.ktsv} panel_key_variants
 CREATE INDEX idx_gene   ON panel_variants(gene_symbol);
 CREATE INDEX idx_sample ON panel_variants(sample);
 CREATE INDEX idx_impact ON panel_variants(impact);
 CREATE INDEX idx_vid    ON panel_variants(variant_id);
+CREATE INDEX idx_krs    ON panel_key_variants(key_rsid);
+
+-- rsid is a ','-joined dbSNP list, so match on a delimited substring, not equality:
+-- ',rs123,' must not match ',rs1234,'.
 CREATE VIEW panel_annotated AS
   SELECT v.*, a.rsid, a.gnomad_af, a.gnomad_hom,
          a.clinvar_significance, a.clinvar_review, a.clinvar_conditions,
-         a.revel, a.phylop
+         a.revel, a.phylop,
+         CASE WHEN EXISTS (
+           SELECT 1 FROM panel_key_variants k
+           WHERE ',' || COALESCE(a.rsid, '') || ',' LIKE '%,' || k.key_rsid || ',%'
+         ) THEN 1 ELSE 0 END AS is_key_variant,
+         g.category AS gene_category,
+         g.priority AS gene_priority,
+         g.exome_capture_note
   FROM panel_variants v
-  LEFT JOIN variant_annotations a USING(variant_id);
+  LEFT JOIN variant_annotations a USING(variant_id)
+  LEFT JOIN panel_genes g ON g.gene_symbol = v.gene_symbol;
+
+-- One row per a-priori rsID: was it called in this cohort, and in how many samples.
+-- Rows with status 'not called' mean the site is absent from the cohort VCF — read
+-- exome_capture_note before concluding anything (promoter/CNV sites are unrecoverable).
+CREATE VIEW key_variant_status AS
+  SELECT k.gene_symbol, k.key_rsid, k.key_variant_note,
+         g.priority, g.category, g.exome_capture_note,
+         CASE WHEN count(a.variant_id) = 0 THEN 'not called' ELSE 'called' END AS status,
+         count(DISTINCT v.sample) AS n_carriers,
+         count(DISTINCT CASE WHEN v.gt IN ('0/1','0|1','1|0') THEN v.sample END) AS n_het,
+         count(DISTINCT CASE WHEN v.gt IN ('1/1','1|1')       THEN v.sample END) AS n_hom,
+         max(a.gnomad_af) AS gnomad_af,
+         group_concat(DISTINCT a.clinvar_significance) AS clinvar_significance
+  FROM panel_key_variants k
+  LEFT JOIN panel_genes g ON g.gene_symbol = k.gene_symbol
+  LEFT JOIN variant_annotations a
+         ON ',' || COALESCE(a.rsid, '') || ',' LIKE '%,' || k.key_rsid || ',%'
+  LEFT JOIN panel_variants v ON v.variant_id = a.variant_id
+  GROUP BY k.gene_symbol, k.key_rsid, k.key_variant_note
+  ORDER BY (count(a.variant_id) = 0), k.gene_symbol;
+
+-- Carrier-level detail for the a-priori variants: one row per (rsID x sample),
+-- with the redundant Ensembl transcript rows collapsed.
+CREATE VIEW key_variant_carriers AS
+  SELECT k.gene_symbol, k.key_rsid, k.key_variant_note, g.priority,
+         v.sample, max(v.gt) AS gt, max(v.dp) AS dp,
+         v.chrom, v.pos, v.ref, v.alt,
+         group_concat(DISTINCT v.consequence) AS consequence,
+         group_concat(DISTINCT v.impact) AS impact,
+         group_concat(DISTINCT NULLIF(v.hgvsp, '.')) AS hgvsp,
+         a.gnomad_af, a.clinvar_significance, a.revel
+  FROM panel_key_variants k
+  JOIN variant_annotations a
+    ON ',' || COALESCE(a.rsid, '') || ',' LIKE '%,' || k.key_rsid || ',%'
+  JOIN panel_variants v
+    ON v.variant_id = a.variant_id AND v.feature LIKE 'ENST%'
+  LEFT JOIN panel_genes g ON g.gene_symbol = k.gene_symbol
+  GROUP BY k.gene_symbol, k.key_rsid, v.sample, v.chrom, v.pos, v.ref, v.alt
+  ORDER BY k.gene_symbol, k.key_rsid, v.sample;
 SQL
+        """
+
+
+# Export every table/view of the panel DB to a multi-sheet .xlsx
+# (panel_annotated first). Spreadsheet-friendly companion to the SQLite DB.
+rule panel_xlsx:
+    input:
+        db=PANEL_DB,
+        script="src/export_panel_xlsx.py",
+    output:
+        xlsx=PANEL_XLSX,
+    log:
+        os.path.join(LOGDIR, "panel_xlsx.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "panel_xlsx.tsv")
+    shell:
+        r"""
+        exec 2> {log}
+        python3 {input.script} {input.db} {output.xlsx}
         """
 
 
@@ -359,14 +521,19 @@ rule panel_report:
     input:
         db=PANEL_DB,
         json=PANEL_JSON,
-        tsv=config["panel_tsv"],
+        csv=config["panel_csv"],
         script="src/make_panel_report.sh",
     output:
         pdf=PANEL_REPORT,
         md=PANEL_REPORT_MD,
+    log:
+        os.path.join(LOGDIR, "panel_report.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "panel_report.tsv")
     shell:
         r"""
-        bash {input.script} {PANEL} {input.db} {input.json} {input.tsv} {output.md}
+        exec 2> {log}
+        bash {input.script} {PANEL} {input.db} {input.json} {input.csv} {output.md}
         pandoc {output.md} -o {output.pdf} \
             --pdf-engine=typst \
             -V fontsize=10pt
@@ -392,8 +559,13 @@ rule pipeline_report:
         spike=config["with_spike_in"],
         trim_q=config["trim_min_quality"],
         trim_len=config["trim_min_length"],
+    log:
+        os.path.join(LOGDIR, "pipeline_report.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "pipeline_report.tsv")
     shell:
         r"""
+        exec 2> {log}
         bash {input.script} {params.outdir} {input.versions} {input.samples} \
             {params.target} {params.probe} {params.padding} {params.spike} \
             {params.trim_q} {params.trim_len} {PANEL} {output.md}

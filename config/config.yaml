@@ -20,13 +20,13 @@ rgid: "Illumina_RGID"
 
 # Gene annotation GTF (GENCODE v47, GRCh38, chr-prefixed contigs — matches the
 # VCF/BAM contig naming). Used to convert gene symbols to coordinate BEDs
-# (e.g. data/pain_genes.tsv -> gene-panel variant extraction).
+# (e.g. data/pain_gene_panel_from_zeev_kain.csv -> gene-panel variant extraction).
 gene_gtf: "/staging/human/reference/hg38/gencode/gencode.v47.primary_assembly.annotation.gtf.gz"
 
-# Gene-panel variant extraction. Symbols in <panel_tsv> col1 are looked up in
-# gene_gtf -> coordinate BED, used to subset each sample's annotated VCF, then
-# merged across samples into a multi-sample VCF + a queryable SQLite DB.
-panel_tsv: "data/pain_genes.tsv"
+# Gene-panel variant extraction. Symbols in <panel_csv> col1 (gene_symbol) are
+# looked up in gene_gtf -> coordinate BED, used to subset each sample's annotated
+# VCF, then merged across samples into a multi-sample VCF + a queryable SQLite DB.
+panel_csv: "data/pain_gene_panel_from_zeev_kain.csv"
 panel_name: "pain"          # basename for results/<panel_name>_variants.*
 panel_gene_padding: 0       # bases added each side of each gene interval
 

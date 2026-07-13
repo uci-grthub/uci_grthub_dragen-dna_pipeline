@@ -94,6 +94,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-2.5.1-py314h2b28147_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/oniguruma-6.9.10-hb9d3cd8_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openjpeg-2.5.4-h55fea9a_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/openpyxl-3.1.5-py314hf3b76af_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.3-h35e630c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/pandoc-3.10-ha770c72_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/perl-5.32.1-7_hd590300_perl5.conda
@@ -138,6 +139,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/cpython-3.14.6-py314hd8ed1ab_100.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/docutils-0.22.4-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/dpath-2.2.0-pyha770c72_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/et_xmlfile-2.0.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/font-ttf-dejavu-sans-mono-2.37-hab24e00_0.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/noarch/font-ttf-inconsolata-3.000-h77eed37_0.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/noarch/font-ttf-source-code-pro-2.038-h77eed37_0.tar.bz2
@@ -1477,6 +1479,19 @@ packages:
     - openjpeg >=2.5.4,<3.0a0
   size: 355400
   timestamp: 1758489294972
+- conda: https://conda.anaconda.org/conda-forge/linux-64/openpyxl-3.1.5-py314hf3b76af_3.conda
+  sha256: 7a6c2355af80e8d1e9a851347dc4f5e737a21da8ebeb7f6e4b9889eb8a0186a2
+  md5: bc90b1901f01e0772c74e24b6f931137
+  depends:
+  - et_xmlfile
+  - libgcc >=14
+  - python >=3.14,<3.15.0a0
+  - python_abi 3.14.* *_cp314
+  license: MIT
+  license_family: MIT
+  run_exports: {}
+  size: 488593
+  timestamp: 1769122083134
 - conda: https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.3-h35e630c_0.conda
   sha256: d48f5c22b9897c01e4dff3680f1f57ceb02711ab9c62f74339b080419dfad34b
   md5: 79dd2074b5cd5c5c6b2930514a11e22d
@@ -2060,6 +2075,16 @@ packages:
   run_exports: {}
   size: 21853
   timestamp: 1762165431693
+- conda: https://conda.anaconda.org/conda-forge/noarch/et_xmlfile-2.0.0-pyhd8ed1ab_1.conda
+  sha256: 2209534fbf2f70c20661ff31f57ab6a97b82ee98812e8a2dcb2b36a0d345727c
+  md5: 71bf9646cbfabf3022c8da4b6b4da737
+  depends:
+  - python >=3.9
+  license: MIT
+  license_family: MIT
+  run_exports: {}
+  size: 21908
+  timestamp: 1733749746332
 - conda: https://conda.anaconda.org/conda-forge/noarch/font-ttf-dejavu-sans-mono-2.37-hab24e00_0.tar.bz2
   sha256: 58d7f40d2940dd0a8aa28651239adbf5613254df0f75789919c4e6762054403b
   md5: 0c96522c6bdaed4b1566d11387caaf45
