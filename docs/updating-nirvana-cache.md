@@ -33,8 +33,7 @@ $N -c <cache-dir> -r <ref.dat> --sd <sd-dir> -i some.vcf.gz -o /tmp/probe
 
 ## Current working configuration
 
-`config/config.yaml` (and the `NIRVANA_*` defaults in `src/run-nirvana.sh` /
-`src/dragen-run-exome.sh`):
+`config/config.yaml` (and the `NIRVANA_*` defaults in `src/run-nirvana.sh`):
 
 ```yaml
 nirvana_cache: "/staging/human/reference/hg38/annotation_data_files/Cache"

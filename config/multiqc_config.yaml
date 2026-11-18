@@ -1,7 +1,3 @@
-# WES run: drop DRAGEN WGS/genome-wide sections that don't apply to
-# target-captured data.
-remove_sections:
-  - dragen-cov-metrics-own-section-wgs
-  - dragen-coverage-per-contig
-  - dragen-coverage-per-nonmain-contig
-  - dragen_ploidy
+# WGS run: keep all DRAGEN sections (genome-wide coverage, per-contig coverage,
+# ploidy, CNV/SV/repeat metrics). Add remove_sections / module order here if needed.
+title: "FrumD WGS — DRAGEN QC"

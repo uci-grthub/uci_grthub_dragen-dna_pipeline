@@ -1,121 +1,111 @@
-# uci_grthub_dragen
+# 261118_FrumD_WGS
 
-DRAGEN drivers for running multiple samples through mapping, variant calling,
-and Nirvana annotation. Two pipelines:
+DRAGEN germline whole-genome sequencing (WGS) analysis, driven by Snakemake
+(`workflow/Snakefile`, config in `config/config.yaml`) and run through pixi.
 
-- **Genome (WGS)** — `src/dragen-run.sh`
-- **Exome** — `src/dragen-run-exome.sh` (target-restricted, padded, on-target QC)
+Per sample, one DRAGEN 4.4.7 run on the hg38 pangenome (hashtable v11) does:
 
-Both read a `sample,R1,R2` CSV. `src/make-sample-file.sh` builds that CSV by
-pairing R1/R2 FASTQs in a directory (sample name = filename up to the `-R1`
-tag; unpaired files skipped with a warning; header `#`-commented so the runners
-skip it):
+- adapter + quality trimming, map/align, duplicate removal
+- genome-wide SNV/indel calling (+ gVCF)
+- CNV calling with self-normalization
+- SV calling
+- repeat-expansion genotyping (ExpansionHunter, DRAGEN default catalog)
+- targeted callers + star-allele / PGx calling
 
-```bash
-./src/make-sample-file.sh --abs --output data/samples.csv
-```
+The small-variant VCF is then annotated with Nirvana (GRCh38), QC is aggregated
+with MultiQC, and a PDF pipeline report is rendered.
 
-Options: `--input-dir` (default `data/FASTQ`), `--output` (default stdout),
-`--abs`, `--r1-tag` / `--r2-tag` (defaults `R1` / `R2`).
-
----
-
-## Genome (WGS) — `dragen-run.sh`
-
-Whole-genome mapping + variant calling over the full reference. No target BED.
-
-- **Reference**: hg19 hash table
-  (`/staging/human/reference/hg19/hg19.fa.k_21.f_16.m_149`)
-- Adapter + quality trimming, mark/remove duplicates
-- Nirvana annotation (GRCh37) of the hard-filtered VCF
+## Quick start
 
 ```bash
-./src/dragen-run.sh \
-  --reference /staging/human/reference/hg19/hg19.fa.k_21.f_16.m_149 \
-  --input-dir /staging/Dragen_Dev/data/FASTQ \
-  --sample-file samples.csv \
-  --output-base /staging/Dragen_Dev/results
+pixi run samples   # build data/samples.csv from data/FASTQ + metadata/metadata.csv
+pixi run dryrun    # show planned jobs
+pixi run run       # run; DRAGEN jobs serialized (resources: dragen=1)
 ```
 
-Dry-run first:
+## Samples
 
-```bash
-./src/dragen-run.sh --reference /path/ref --input-dir /data/fastq \
-  --sample-file samples.csv --output-base /tmp/out --dry-run
-```
+FASTQs live in `data/FASTQ` (`<run>-<lane>-...-<i7>-<i5>-R{1,2}.fastq.gz`).
+`src/make-sample-file.sh --metadata metadata/metadata.csv` names each pair by
+matching the `<i7>-<i5 NovaSeq v1.5>` barcodes in the filename against
+`metadata/metadata.csv`:
 
-Key options: `--reference`, `--input-dir`, `--sample-file`, `--output-base`,
-`--rgid`, `--vc-filter`, `--enable-variant-caller true|false`, `--dry-run`,
-`--create-only`.
+| sample | i7 | i5 (NovaSeq v1.5) |
+|---|---|---|
+| PT2 | ACCACACG | CAACCACG |
+| PT5 | ACCAGGAC | CCGCTACA |
 
----
+Without `--metadata` the sample name is the filename prefix before `-R1`.
+Unmatched FASTQs are skipped with a warning.
 
-## Exome — `dragen-run-exome.sh`
+## Config toggles (`config/config.yaml`)
 
-Restricts variant calling to the IDT xGen Exome Research Panel v2 target BED
-(hg38), pads targets, reports on-target coverage QC, and writes BAMs.
+| key | default | DRAGEN flags |
+|---|---|---|
+| `enable_cnv` | `true` | `--enable-cnv true --cnv-enable-self-normalization true` |
+| `enable_sv` | `true` | `--enable-sv true` |
+| `enable_repeats` | `true` | `--repeat-genotype-enable true` |
+| `enable_pgx` | `true` | `--enable-targeted true --enable-star-allele true --enable-pgx true` |
+| `emit_gvcf` | `true` | `--vc-emit-ref-confidence GVCF --vc-enable-vcf-output true` |
+| `vc_filter` | `""` | `--vc-hard-filter` (omitted when empty) |
+| `enable_panel` | `false` | gene-panel extraction (not a DRAGEN flag; see below) |
 
-- **Reference**: hg38 pangenome (`/staging/human/reference/hg38/pangenome_reference`, hashtable v11)
-- **BEDs**: `/staging/human/reference/hg38/exome_beds/idt_x_gen_exome_research_panel_v2`
-  - kit: `xgen-exome-hyb-panel-v2-{targets,probes}-hg38.bed`
-  - spike-in: `spike-in-xgen-exome-v2-{targets,probes}-hg38.bed`
-- Adapter + quality trimming, mark/remove duplicates
-- Variant calling over target BED, padded 100 bp (default)
-- On-target coverage QC (target BED = region 1, probe BED = region 2)
-- Mapped reads written to `<sample>.bam` (+ `.bai`)
-- Nirvana annotation (GRCh38) of the hard-filtered VCF
+## Gene panel (optional, `enable_panel`)
 
-Kit only:
+Panel-agnostic gene-panel extraction (machinery inherited from the KainZ exome
+project). When `enable_panel: true`,
+genes in `panel_csv` (col 1 `gene_symbol`) are mapped to coordinates via the
+GENCODE GTF. Each annotated VCF is then subset to those genes, and the subsets
+are merged across samples. The merged sites are annotated once with Nirvana
+JSON (gnomAD, ClinVar, dbSNP, REVEL, phyloP) and loaded into:
 
-```bash
-./src/dragen-run-exome.sh \
-  --sample-file data/samples.csv \
-  --output-base results
-```
+- `results/<panel_name>_variants.sqlite` (+ `.xlsx`, `.vcf.gz`)
+- `results/<panel_name>_report.pdf`
 
-With spike-in panel (this prep used it — merges kit + spike-in BEDs into a
-union for both calling and QC; requires `bedtools`, installed in the miniforge
-base env). Merged BEDs written to `<output-base>/combined-{targets,probes}-hg38.bed`:
+The panel is defined by three config keys:
 
-```bash
-./src/dragen-run-exome.sh \
-  --sample-file data/samples.csv \
-  --output-base results \
-  --with-spike-in
-```
+| key | meaning |
+|---|---|
+| `panel_csv` | gene list CSV (header row; `gene_symbol` = column 1, the only required column) |
+| `panel_name` | basename for `results/<panel_name>_*`, shown in reports |
+| `panel_description` | paragraph printed in the PDF report + xlsx README sheet |
 
-### Exome options
+Optional CSV columns (any order after column 1, missing = empty): `ensembl_gene_id`,
+`category`, `priority`, `mechanism`, `key_variants` (rsIDs here set
+`is_key_variant`), `evidence_note`, `exome_capture_note`.
 
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `--reference PATH` | hg38 hash table | DRAGEN hash-table reference dir |
-| `--input-dir PATH` | (none) | FASTQ dir; used when sample file has basenames |
-| `--sample-file PATH` | **required** | CSV `sample,R1,R2` (`#` lines ignored) |
-| `--output-base PATH` | **required** | Base output dir (per-sample subdir created) |
-| `--target-bed PATH` | xGen v2 targets | Target BED for variant calling |
-| `--target-padding N` | `100` | Bases padded each side of targets (calling only) |
-| `--probe-bed PATH` | xGen v2 probes | Probe BED for coverage QC (region 2) |
-| `--with-spike-in` | off | Merge spike-in BEDs into kit BEDs (union) |
-| `--spike-target-bed PATH` | spike-in targets | Spike-in target BED |
-| `--spike-probe-bed PATH` | spike-in probes | Spike-in probe BED |
-| `--rgid STR` | `Illumina_RGID` | Read group ID |
-| `--vc-filter STR` | *empty* | Hard-filter string; omitted when empty |
-| `--enable-variant-caller true\|false` | `true` | Toggle variant calling |
-| `--dry-run` | off | Print commands, do not execute |
-| `--create-only` | off | Create dirs + print commands, do not run DRAGEN |
+To use a different panel, point `panel_csv` at the new CSV and change
+`panel_name` and `panel_description`. Each `panel_name` writes its own
+`results/<panel_name>_*` files, so the old panel's results are kept.
 
-### Exome outputs (per sample, under `<output-base>/<sample>/`)
+Current default: `data/pain_gene_panel_from_zeev_kain.csv` (pain panel copied
+from the KainZ project). `data/` is gitignored, so copy the file in again on a
+fresh clone.
+`pixi run pain-genes` rebuilds the GO + CPIC/PharmGKB sourced list in
+`data/pain_genes.tsv`, which has a different format and is not read by the workflow.
 
-- `<sample>.bam` + `<sample>.bam.bai` — mapped, dedup'd reads
-- `<sample>.hard-filtered.vcf.gz` — variants
-- coverage QC reports (`*.qc-coverage-region-*`)
-- Nirvana annotation files (if run)
+One-off run without editing config: `pixi run snakemake --cores all --resources dragen=1 --config enable_panel=True`.
 
-### Notes
+## Outputs
 
-- Padding applies to variant-calling regions only, not the QC BED.
-- `--vc-filter` empty by default → no `--vc-hard-filter` passed. Provide a value
-  to enable DRAGEN hard filtering, e.g.
-  `--vc-filter 'SNP filter:snp:QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0; INDEL filter:indel:QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0'`
-- `--with-spike-in` needs `bedtools` on `PATH`.
-- Nirvana paths default to GRCh38; override via `NIRVANA_*` environment variables.
+Per sample, under `output/<sample>/`:
+
+- `<sample>.bam` (+ `.bai`) — mapped, deduplicated reads
+- `<sample>.hard-filtered.vcf.gz` — small variants; `.hard-filtered.gvcf.gz` gVCF
+- `<sample>.annotated.vcf.gz` — Nirvana-annotated small variants
+- `<sample>.cnv.vcf.gz`, `<sample>.sv.vcf.gz`, `<sample>.repeats.vcf.gz`
+- star-allele / PGx / targeted-caller outputs, DRAGEN QC metrics
+
+Cohort-level:
+
+- `output/multiqc/multiqc_report.html` — aggregated QC
+- `output/versions.yaml` — live tool/reference versions
+- `results/pipeline_report.pdf` — methods + versions + outputs
+
+## Development
+
+Format the Snakefile with `pixi run snakefmt workflow/Snakefile`.
+
+Legacy standalone drivers (`src/dragen-run.sh`, `src/run-nirvana.sh`,
+`src/WGS_bwa_gatk.sh`, `src/run_chen.sh`) are not used by the workflow.
+See `docs/updating-nirvana-cache.md` for refreshing Nirvana annotation data.

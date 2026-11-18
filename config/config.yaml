@@ -1,4 +1,4 @@
-# Config for the DRAGEN exome + Nirvana + MultiQC Snakemake workflow.
+# Config for the DRAGEN germline WGS + Nirvana + MultiQC Snakemake workflow.
 
 # Tool / reference versions (provenance record). The `versions` rule also
 # writes the live-detected values to <outdir>/versions.yaml at run time.
@@ -8,7 +8,10 @@ hashtable_version: "11"        # hg38 pangenome reference
 
 # Sample sheet: CSV with `sample,R1,R2` lines (# comments ignored).
 # Regenerate with: pixi run samples
+# Sample names come from metadata_csv (matched on the i7-i5 barcode pair in
+# the FASTQ filename).
 samples_csv: "data/samples.csv"
+metadata_csv: "metadata/metadata.csv"
 
 # Base output directory (one subdirectory per sample is created).
 outdir: "output"
@@ -18,30 +21,37 @@ dragen_bin: "/opt/dragen/4.4.7/bin/dragen"
 reference: "/staging/human/reference/hg38/pangenome_reference"
 rgid: "Illumina_RGID"
 
-# Gene annotation GTF (GENCODE v47, GRCh38, chr-prefixed contigs — matches the
-# VCF/BAM contig naming). Used to convert gene symbols to coordinate BEDs
-# (e.g. data/pain_gene_panel_from_zeev_kain.csv -> gene-panel variant extraction).
-gene_gtf: "/staging/human/reference/hg38/gencode/gencode.v47.primary_assembly.annotation.gtf.gz"
+# Germline WGS callers (each adds flags to the single DRAGEN run per sample).
+enable_cnv: true       # --enable-cnv + --cnv-enable-self-normalization
+enable_sv: true        # --enable-sv (Manta-based SV caller)
+enable_repeats: true   # --repeat-genotype-enable (ExpansionHunter, default catalog)
+enable_pgx: true       # --enable-targeted + --enable-star-allele + --enable-pgx
+emit_gvcf: true        # --vc-emit-ref-confidence GVCF (keeps joint genotyping open)
 
-# Gene-panel variant extraction. Symbols in <panel_csv> col1 (gene_symbol) are
-# looked up in gene_gtf -> coordinate BED, used to subset each sample's annotated
-# VCF, then merged across samples into a multi-sample VCF + a queryable SQLite DB.
+# Gene-panel variant extraction (any curated gene list). When true,
+# symbols in <panel_csv> col1 (gene_symbol) are looked up in gene_gtf -> BED,
+# each sample's annotated VCF is subset to those genes, merged into a
+# multi-sample VCF, site-annotated once with Nirvana (JSON), and loaded into a
+# queryable SQLite DB + .xlsx + PDF report under results/<panel_name>_*.
+# panel_csv: CSV with a header row; gene_symbol must be column 1 (only
+#   required column). Optional columns (any order after it, missing = empty): ensembl_gene_id, category, priority,
+#   mechanism, key_variants (rsIDs here drive is_key_variant), evidence_note,
+#   exome_capture_note (free-text coverage/recoverability caveat).
+# To switch panels: point panel_csv at the new CSV, change panel_name and
+# panel_description. Outputs for different panel_name values do not collide.
+enable_panel: false
 panel_csv: "data/pain_gene_panel_from_zeev_kain.csv"
-panel_name: "pain"          # basename for results/<panel_name>_variants.*
+panel_name: "pain"          # basename for results/<panel_name>_*; shown in reports
+# One paragraph (Markdown ok) describing the panel's origin and scope; printed
+# in the panel PDF report and the xlsx README sheet.
+panel_description: >-
+  A-priori pain / analgesia candidate-gene list curated by Zeev Kain (copied
+  from the KainZ exome project): opioid pharmacokinetics / pharmacodynamics,
+  pain sensitivity and nociception, chronic postsurgical pain,
+  neuroinflammation and reward-axis genes.
 panel_gene_padding: 0       # bases added each side of each gene interval
-
-# Exome capture BEDs — IDT xGen Exome Research Panel v2 (hg38).
-target_bed: "/staging/human/reference/hg38/exome_beds/idt_x_gen_exome_research_panel_v2/xgen-exome-hyb-panel-v2-targets-hg38.bed"
-probe_bed:  "/staging/human/reference/hg38/exome_beds/idt_x_gen_exome_research_panel_v2/xgen-exome-hyb-panel-v2-probes-hg38.bed"
-
-# Spike-in panel — set with_spike_in: true to call + QC over the union of
-# kit + spike-in regions (this prep used the spike-in).
-with_spike_in: true
-spike_target_bed: "/staging/human/reference/hg38/exome_beds/idt_x_gen_exome_research_panel_v2/spike-in-xgen-exome-v2-targets-hg38.bed"
-spike_probe_bed:  "/staging/human/reference/hg38/exome_beds/idt_x_gen_exome_research_panel_v2/spike-in-xgen-exome-v2-probes-hg38.bed"
-
-# Bases padded each side of target regions for variant calling (calling only).
-target_padding: 100
+# GENCODE v47 GTF (GRCh38, chr-prefixed contigs; matches the VCF naming).
+gene_gtf: "/staging/human/reference/hg38/gencode/gencode.v47.primary_assembly.annotation.gtf.gz"
 
 # Adapter + quality trimming.
 trim_adapter_r1: "/staging/human/Trimmomatic-0.39/adapters/TruSeq3-PE-2.fa"
@@ -49,7 +59,8 @@ trim_adapter_r2: "/staging/human/Trimmomatic-0.39/adapters/TruSeq3-PE-2.fa"
 trim_min_quality: 15
 trim_min_length: 20
 
-# Variant-caller hard filter. Empty = no --vc-hard-filter passed.
+# Variant-caller hard filter. Empty = no --vc-hard-filter passed (DRAGEN default
+# filters still apply).
 # Example:
 #   "SNP filter:snp:QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0; INDEL filter:indel:QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"
 vc_filter: ""

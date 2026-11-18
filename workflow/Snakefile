@@ -1,6 +1,8 @@
 import os
 
+
 configfile: "config/config.yaml"
+
 
 OUTDIR = config["outdir"]
 LOGDIR = os.path.join(OUTDIR, "logs")
@@ -22,117 +24,116 @@ with open(config["samples_csv"]) as fh:
 if not SAMPLES:
     raise ValueError(f"No samples parsed from {config['samples_csv']}")
 
-# ---- target/probe BEDs: kit only, or kit+spike-in union ----
-if config["with_spike_in"]:
-    TARGET_BED = os.path.join(OUTDIR, "combined-targets-hg38.bed")
-    PROBE_BED  = os.path.join(OUTDIR, "combined-probes-hg38.bed")
-else:
-    TARGET_BED = config["target_bed"]
-    PROBE_BED  = config["probe_bed"]
-
+# ---- optional caller outputs (declared only when enabled) ----
+EXTRA_OUTPUTS = {
+    "sv": ("enable_sv", ".sv.vcf.gz"),
+    "cnv": ("enable_cnv", ".cnv.vcf.gz"),
+    "repeats": ("enable_repeats", ".repeats.vcf.gz"),
+}
 # ---- gene-panel variant extraction paths ----
-PANEL          = config["panel_name"]
-RESULTS        = "results"
-PANEL_BED      = os.path.join(RESULTS, PANEL + "_genes.bed")
-PANEL_VCF      = os.path.join(RESULTS, PANEL + "_variants.vcf.gz")
-PANEL_SITES    = os.path.join(RESULTS, "annot", PANEL + "_sites.vcf.gz")
-PANEL_JSON     = os.path.join(RESULTS, "annot", PANEL + "_sites.json.gz")
-PANEL_DB          = os.path.join(RESULTS, PANEL + "_variants.sqlite")
-PANEL_XLSX        = os.path.join(RESULTS, PANEL + "_variants.xlsx")
-PANEL_REPORT_MD   = os.path.join(RESULTS, PANEL + "_report.md")
-PANEL_REPORT      = os.path.join(RESULTS, PANEL + "_report.pdf")
+PANEL = config["panel_name"]
+RESULTS = "results"
+PANEL_BED = os.path.join(RESULTS, PANEL + "_genes.bed")
+PANEL_VCF = os.path.join(RESULTS, PANEL + "_variants.vcf.gz")
+PANEL_SITES = os.path.join(RESULTS, "annot", PANEL + "_sites.vcf.gz")
+PANEL_JSON = os.path.join(RESULTS, "annot", PANEL + "_sites.json.gz")
+PANEL_DB = os.path.join(RESULTS, PANEL + "_variants.sqlite")
+PANEL_XLSX = os.path.join(RESULTS, PANEL + "_variants.xlsx")
+PANEL_REPORT_MD = os.path.join(RESULTS, PANEL + "_report.md")
+PANEL_REPORT = os.path.join(RESULTS, PANEL + "_report.pdf")
 PIPELINE_REPORT_MD = os.path.join(RESULTS, "pipeline_report.md")
-PIPELINE_REPORT    = os.path.join(RESULTS, "pipeline_report.pdf")
+PIPELINE_REPORT = os.path.join(RESULTS, "pipeline_report.pdf")
 
 
 rule all:
     input:
         os.path.join(OUTDIR, "versions.yaml"),
         os.path.join(OUTDIR, "multiqc", "multiqc_report.html"),
-        expand(os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"), sample=SAMPLES),
-        PANEL_DB,
-        PANEL_XLSX,
-        PANEL_VCF,
-        PANEL_REPORT,
+        expand(
+            os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
+            sample=SAMPLES,
+        ),
         PIPELINE_REPORT,
+        # gene-panel extraction only when enabled
+        [PANEL_DB, PANEL_XLSX, PANEL_VCF, PANEL_REPORT]
+        if config["enable_panel"]
+        else [],
 
 
 # Record live tool/reference versions for provenance.
 rule versions:
     output:
         os.path.join(OUTDIR, "versions.yaml"),
-    params:
-        dragen=config["dragen_bin"],
-        nirvana=config["nirvana_bin"],
-        ref=config["reference"],
     log:
         os.path.join(LOGDIR, "versions.log"),
     benchmark:
         os.path.join(BENCHDIR, "versions.tsv")
+    params:
+        dragen=config["dragen_bin"],
+        nirvana=config["nirvana_bin"],
+        ref=config["reference"],
     shell:
         r"""
-        exec 2> {log}
-        {{
-          echo "dragen: \"$({params.dragen} --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')\""
-          echo "ica: \"$({params.nirvana} --version 2>&1 | grep -oiE 'Annotations [0-9.]+' | grep -oE '[0-9.]+')\""
-          echo "hashtable_version: \"$(grep -oE '\"hashtable_version\": \"[0-9]+\"' {params.ref}/info.json | grep -oE '[0-9]+' || echo NA)\""
-        }} > {output}
+        exec 2>{log} >{output}
+        echo "dragen: \"$({params.dragen} --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')\""
+        echo "ica: \"$({params.nirvana} --version 2>&1 | grep -oiE 'Annotations [0-9.]+' | grep -oE '[0-9.]+')\""
+        echo "hashtable_version: \"$(grep -oE '\"hashtable_version\": \"[0-9]+\"' {params.ref}/info.json | grep -oE '[0-9]+' || echo NA)\""
         """
 
 
-# Merge kit + spike-in BEDs into a sorted, non-overlapping union.
-rule merge_beds:
-    input:
-        kit_t=config["target_bed"],
-        spk_t=config["spike_target_bed"],
-        kit_p=config["probe_bed"],
-        spk_p=config["spike_probe_bed"],
-    output:
-        t=os.path.join(OUTDIR, "combined-targets-hg38.bed"),
-        p=os.path.join(OUTDIR, "combined-probes-hg38.bed"),
-    log:
-        os.path.join(LOGDIR, "merge_beds.log"),
-    benchmark:
-        os.path.join(BENCHDIR, "merge_beds.tsv")
-    shell:
-        r"""
-        exec 2> {log}
-        cat {input.kit_t} {input.spk_t} | cut -f1-3 | sort -k1,1 -k2,2n | bedtools merge -i - > {output.t}
-        cat {input.kit_p} {input.spk_p} | cut -f1-3 | sort -k1,1 -k2,2n | bedtools merge -i - > {output.p}
-        """
-
-
-# DRAGEN map/align + variant call, restricted to the (padded) target BED,
-# with on-target coverage QC. Serialized via resources: dragen=1.
+# DRAGEN germline WGS: map/align, dedup, small-variant calling over the whole
+# genome, plus optional CNV / SV / repeat-expansion / PGx callers in the same
+# run. Serialized via resources: dragen=1 (one FPGA job at a time).
 rule dragen:
     input:
         r1=lambda wc: SAMPLES[wc.sample][0],
         r2=lambda wc: SAMPLES[wc.sample][1],
-        target=TARGET_BED,
-        probe=PROBE_BED,
     output:
+        **{
+            k: os.path.join(OUTDIR, "{sample}", "{sample}" + suffix)
+            for k, (flag, suffix) in EXTRA_OUTPUTS.items()
+            if config[flag]
+        },
         bam=os.path.join(OUTDIR, "{sample}", "{sample}.bam"),
         vcf=os.path.join(OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"),
+    log:
+        os.path.join(LOGDIR, "dragen", "{sample}.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "dragen", "{sample}.tsv")
+    resources:
+        dragen=1,
     params:
         dragen=config["dragen_bin"],
         ref=config["reference"],
         rgid=config["rgid"],
-        padding=config["target_padding"],
         adapter_r1=config["trim_adapter_r1"],
         adapter_r2=config["trim_adapter_r2"],
         min_q=config["trim_min_quality"],
         min_len=config["trim_min_length"],
         vc_filter=config["vc_filter"],
+        callers=" ".join(
+            (
+                ["--enable-cnv true --cnv-enable-self-normalization true"]
+                if config["enable_cnv"]
+                else []
+            )
+            + (["--enable-sv true"] if config["enable_sv"] else [])
+            + (["--repeat-genotype-enable true"] if config["enable_repeats"] else [])
+            + (
+                ["--enable-targeted true --enable-star-allele true --enable-pgx true"]
+                if config["enable_pgx"]
+                else []
+            )
+            + (
+                ["--vc-emit-ref-confidence GVCF --vc-enable-vcf-output true"]
+                if config["emit_gvcf"]
+                else []
+            )
+        ),
         outdir=lambda wc: os.path.join(OUTDIR, wc.sample),
-    resources:
-        dragen=1,
-    log:
-        os.path.join(LOGDIR, "dragen", "{sample}.log"),
-    benchmark:
-        os.path.join(BENCHDIR, "dragen", "{sample}.tsv")
     shell:
         r"""
-        exec 2> {log}
+        exec 2>{log}
         filter_arg=()
         if [ -n "{params.vc_filter}" ]; then
             filter_arg=(--vc-hard-filter "{params.vc_filter}")
@@ -145,8 +146,6 @@ rule dragen:
             --enable-map-align true \
             --enable-map-align-output true \
             --output-format BAM \
-            --vc-target-bed {input.target} \
-            --vc-target-bed-padding {params.padding} \
             --RGID {params.rgid} \
             --RGSM {wildcards.sample} \
             --output-directory {params.outdir} \
@@ -157,10 +156,7 @@ rule dragen:
             --trim-adapter-read2 {params.adapter_r2} \
             --trim-min-quality {params.min_q} \
             --trim-min-length {params.min_len} \
-            --qc-coverage-region-1 {input.target} \
-            --qc-coverage-reports-1 cov_report \
-            --qc-coverage-region-2 {input.probe} \
-            --qc-coverage-reports-2 cov_report \
+            {params.callers} \
             "${{filter_arg[@]}}"
         """
 
@@ -171,6 +167,10 @@ rule nirvana:
         vcf=os.path.join(OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"),
     output:
         vcf=os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
+    log:
+        os.path.join(LOGDIR, "nirvana", "{sample}.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "nirvana", "{sample}.tsv")
     params:
         bin=config["nirvana_bin"],
         cache=config["nirvana_cache"],
@@ -178,13 +178,9 @@ rule nirvana:
         sd=config["nirvana_sd"],
         fmt=config["nirvana_output_format"],
         out_prefix=lambda wc: os.path.join(OUTDIR, wc.sample, wc.sample + ".annotated"),
-    log:
-        os.path.join(LOGDIR, "nirvana", "{sample}.log"),
-    benchmark:
-        os.path.join(BENCHDIR, "nirvana", "{sample}.tsv")
     shell:
         r"""
-        exec 2> {log}
+        exec 2>{log}
         {params.bin} -c {params.cache} -r {params.dat} --sd {params.sd} \
             --output-format {params.fmt} -i {input.vcf} -o {params.out_prefix}
         """
@@ -197,21 +193,23 @@ rule multiqc:
         cfg="config/multiqc_config.yaml",
     output:
         os.path.join(OUTDIR, "multiqc", "multiqc_report.html"),
-    params:
-        scan=OUTDIR,
-        outdir=os.path.join(OUTDIR, "multiqc"),
     log:
         os.path.join(LOGDIR, "multiqc.log"),
     benchmark:
         os.path.join(BENCHDIR, "multiqc.tsv")
+    params:
+        scan=OUTDIR,
+        outdir=os.path.join(OUTDIR, "multiqc"),
     shell:
         r"""
-        exec 2> {log}
+        exec 2>{log}
         multiqc {params.scan} -c {input.cfg} -o {params.outdir} -n multiqc_report.html -f
         """
 
 
-# ---- Gene-panel variant extraction (e.g. pain genes) ----
+# ---- Gene-panel variant extraction (enable_panel; panel set by panel_csv / panel_name) ----
+# Rules are always defined but only scheduled when rule all requests them.
+
 
 # Look up panel symbols (col1 of panel_csv) in the GENCODE GTF, emit a padded,
 # sorted, merged coordinate BED. Contigs are chr-prefixed (match the VCFs).
@@ -223,15 +221,15 @@ rule panel_bed:
         csv=config["panel_csv"],
     output:
         bed=PANEL_BED,
-    params:
-        pad=config["panel_gene_padding"],
     log:
         os.path.join(LOGDIR, "panel_bed.log"),
     benchmark:
         os.path.join(BENCHDIR, "panel_bed.tsv")
+    params:
+        pad=config["panel_gene_padding"],
     shell:
         r"""
-        exec 2> {log}
+        exec 2>{log}
         gawk -F'\t' -v PAD={params.pad} '
             NR==FNR {{
                 sub(/\r$/,""); split($0, c, ",")
@@ -246,8 +244,8 @@ rule panel_bed:
                     print $1"\t"s"\t"e"\t"name
                 }}
             }}' {input.csv} <(zcat {input.gtf}) \
-          | sort -k1,1 -k2,2n \
-          | bedtools merge -i - > {output.bed}
+            | sort -k1,1 -k2,2n \
+            | bedtools merge -i - >{output.bed}
         test -s {output.bed}
         """
 
@@ -267,7 +265,7 @@ rule panel_subset:
         os.path.join(BENCHDIR, "panel_subset", "{sample}.tsv")
     shell:
         r"""
-        exec 2> {log}
+        exec 2>{log}
         bcftools view -T {input.bed} {input.vcf} -Oz -o {output.vcf}
         tabix -f -p vcf {output.vcf}
         """
@@ -289,7 +287,7 @@ rule panel_merge:
         os.path.join(BENCHDIR, "panel_merge.tsv")
     shell:
         r"""
-        exec 2> {log}
+        exec 2>{log}
         bcftools merge -Oz -o {output.vcf} {input.vcfs}
         tabix -f -p vcf {output.vcf}
         """
@@ -308,7 +306,7 @@ rule panel_sites:
         os.path.join(BENCHDIR, "panel_sites.tsv")
     shell:
         r"""
-        exec 2> {log}
+        exec 2>{log}
         bcftools view -G {input.vcf} -Oz -o {output.vcf}
         """
 
@@ -321,19 +319,19 @@ rule panel_annotate:
         vcf=PANEL_SITES,
     output:
         json=PANEL_JSON,
+    log:
+        os.path.join(LOGDIR, "panel_annotate.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "panel_annotate.tsv")
     params:
         bin=config["nirvana_bin"],
         cache=config["nirvana_cache"],
         dat=config["nirvana_dat"],
         sd=config["nirvana_sd"],
         out_prefix=os.path.join(RESULTS, "annot", PANEL + "_sites"),
-    log:
-        os.path.join(LOGDIR, "panel_annotate.log"),
-    benchmark:
-        os.path.join(BENCHDIR, "panel_annotate.tsv")
     shell:
         r"""
-        exec 2> {log}
+        exec 2>{log}
         {params.bin} -c {params.cache} -r {params.dat} --sd {params.sd} \
             --output-format json -i {input.vcf} -o {params.out_prefix}
         """
@@ -360,31 +358,31 @@ rule panel_db:
         script="src/panel_tables.py",
     output:
         db=PANEL_DB,
+    log:
+        os.path.join(LOGDIR, "panel_db.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "panel_db.tsv")
     params:
         vtsv=os.path.join(RESULTS, PANEL + "_variants.tsv"),
         atsv=os.path.join(RESULTS, "annot", PANEL + "_annotations.tsv"),
         gtsv=os.path.join(RESULTS, "annot", PANEL + "_genes.tsv"),
         ktsv=os.path.join(RESULTS, "annot", PANEL + "_key_variants.tsv"),
-    log:
-        os.path.join(LOGDIR, "panel_db.log"),
-    benchmark:
-        os.path.join(BENCHDIR, "panel_db.tsv")
     shell:
         r"""
-        exec 2> {log}
+        exec 2>{log}
         # panel metadata + a-priori (gene, rsID) pairs from the curated CSV
         python3 {input.script} {input.csv} {params.gtsv} {params.ktsv}
 
         # per-sample consequence rows (panel genes only, carriers only)
         bcftools +split-vep {input.vcf} -d \
             -f '[%CHROM\t%POS\t%REF\t%ALT\t%SAMPLE\t%GT\t%DP\t%GeneSymbol\t%GeneNcbiId\t%Feature\t%Canonical\t%Consequence\t%Impact\t%BioType\t%HGVSc\t%HGVSp\t%VariantId\n]' \
-          | awk -F'\t' 'NR==FNR {{
+            | awk -F'\t' 'NR==FNR {{
                           sub(/\r$/,""); split($0, c, ",")
                           if (c[1]!="" && c[1]!~/^#/ && c[1]!="gene_symbol") g[c[1]]=1
                           next
                         }}
                         $6 !~ /^(0[\/|]0|\.[\/|]\.|\.)$/ && ($8 in g)' \
-                {input.csv} - > {params.vtsv}
+                {input.csv} - >{params.vtsv}
 
         # site-level annotations keyed by vid (== CSQ VariantId)
         zcat {input.json} | jq -r '
@@ -402,7 +400,7 @@ rule panel_db:
                 (.revel.score // ""),
                 (.phylopScore // "")
               ] | @tsv' \
-          | awk -F'\t' '!seen[$1]++' > {params.atsv}
+            | awk -F'\t' '!seen[$1]++' >{params.atsv}
 
         rm -f {output.db}
         sqlite3 {output.db} <<'SQL'
@@ -507,10 +505,12 @@ rule panel_xlsx:
         os.path.join(LOGDIR, "panel_xlsx.log"),
     benchmark:
         os.path.join(BENCHDIR, "panel_xlsx.tsv")
+    params:
+        desc=config["panel_description"],
     shell:
         r"""
-        exec 2> {log}
-        python3 {input.script} {input.db} {output.xlsx}
+        exec 2>{log}
+        python3 {input.script} {input.db} {output.xlsx} {PANEL} {params.desc:q}
         """
 
 
@@ -530,10 +530,12 @@ rule panel_report:
         os.path.join(LOGDIR, "panel_report.log"),
     benchmark:
         os.path.join(BENCHDIR, "panel_report.tsv")
+    params:
+        desc=config["panel_description"],
     shell:
         r"""
-        exec 2> {log}
-        bash {input.script} {PANEL} {input.db} {input.json} {input.csv} {output.md}
+        exec 2>{log}
+        bash {input.script} {PANEL} {input.db} {input.json} {input.csv} {output.md} {params.desc:q}
         pandoc {output.md} -o {output.pdf} \
             --pdf-engine=typst \
             -V fontsize=10pt
@@ -551,24 +553,27 @@ rule pipeline_report:
     output:
         pdf=PIPELINE_REPORT,
         md=PIPELINE_REPORT_MD,
-    params:
-        outdir=OUTDIR,
-        target=TARGET_BED,
-        probe=PROBE_BED,
-        padding=config["target_padding"],
-        spike=config["with_spike_in"],
-        trim_q=config["trim_min_quality"],
-        trim_len=config["trim_min_length"],
     log:
         os.path.join(LOGDIR, "pipeline_report.log"),
     benchmark:
         os.path.join(BENCHDIR, "pipeline_report.tsv")
+    params:
+        outdir=OUTDIR,
+        trim_q=config["trim_min_quality"],
+        trim_len=config["trim_min_length"],
+        cnv=config["enable_cnv"],
+        sv=config["enable_sv"],
+        repeats=config["enable_repeats"],
+        pgx=config["enable_pgx"],
+        gvcf=config["emit_gvcf"],
+        panel=config["enable_panel"],
     shell:
         r"""
-        exec 2> {log}
+        exec 2>{log}
         bash {input.script} {params.outdir} {input.versions} {input.samples} \
-            {params.target} {params.probe} {params.padding} {params.spike} \
-            {params.trim_q} {params.trim_len} {PANEL} {output.md}
+            {params.trim_q} {params.trim_len} \
+            {params.cnv} {params.sv} {params.repeats} {params.pgx} {params.gvcf} \
+            {params.panel} {PANEL} {output.md}
         pandoc {output.md} -o {output.pdf} \
             --pdf-engine=typst \
             -V fontsize=10pt

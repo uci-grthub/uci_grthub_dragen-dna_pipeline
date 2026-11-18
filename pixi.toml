@@ -1,27 +1,29 @@
 [workspace]
 authors = ["whtns <kevin.stachelek@gmail.com>"]
 channels = ["conda-forge", "bioconda"]
-name = "260709_KainZ_exome"
+name = "261118_FrumD_WGS"
 platforms = ["linux-64"]
 version = "0.1.0"
 
 [dependencies]
+snakefmt = "*"
 snakemake-minimal = ">=8"
 multiqc = "*"
-bedtools = "*"
 bcftools = "*"
 htslib = "*"        # bgzip + tabix
+pandoc = "*"        # render pipeline report md -> pdf
+typst = "*"         # pandoc PDF engine (no LaTeX)
+# gene-panel extraction (enable_panel)
+bedtools = "*"
 gawk = "*"          # portable awk for GTF parsing
 sqlite = "*"        # gene-panel variant DB
 jq = "*"            # parse Nirvana JSON annotations
-pandoc = "*"        # render panel report md -> pdf
-typst = "*"         # pandoc PDF engine (no LaTeX)
 python = "*"        # panel xlsx export script
 openpyxl = "*"      # write panel DB -> .xlsx
 
 [tasks]
 # regenerate the sample sheet from data/FASTQ
-samples = "bash src/make-sample-file.sh --abs --output data/samples.csv"
+samples = "bash src/make-sample-file.sh --abs --metadata metadata/metadata.csv --output data/samples.csv"
 # rebuild the sourced pain-gene panel (QuickGO GO terms + CPIC/PharmGKB PGx)
 pain-genes = "bash src/fetch_pain_genes.sh"
 # dry-run the workflow (no execution)
