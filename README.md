@@ -1,7 +1,9 @@
-# 261118_FrumD_WGS
+# uci_grthub_dragen-dna_pipeline
 
 DRAGEN germline whole-genome sequencing (WGS) analysis, driven by Snakemake
 (`workflow/Snakefile`, config in `config/config.yaml`) and run through pixi.
+The current config and `metadata/metadata.csv` are set up for the
+261118_FrumD_WGS project.
 
 Per sample, one DRAGEN 4.4.7 run on the hg38 pangenome (hashtable v11) does:
 
@@ -68,7 +70,7 @@ The panel is defined by three config keys:
 |---|---|
 | `panel_csv` | gene list CSV (header row; `gene_symbol` = column 1, the only required column) |
 | `panel_name` | basename for `results/<panel_name>_*`, shown in reports |
-| `panel_description` | paragraph printed in the PDF report + xlsx README sheet |
+| `panel_description` | paragraph printed in the PDF report + xlsx `Overview` sheet |
 
 Optional CSV columns (any order after column 1, missing = empty): `ensembl_gene_id`,
 `category`, `priority`, `mechanism`, `key_variants` (rsIDs here set
