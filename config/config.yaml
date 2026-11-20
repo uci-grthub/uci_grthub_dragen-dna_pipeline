@@ -48,8 +48,13 @@ somatic_outdir: "output/somatic"
 somatic_reference: "/staging/human/reference/hg38/hg38-alt_masked.cnv.hla.methyl_cg.methylated_combined.rna-11-r5.0-1"
 vc_target_vaf: 0.03            # recipe default (>= 3% VAF)
 # Nirvana data dir (Cache/ References/ SupplementaryAnnotation/) used by DRAGEN
-# for germline tagging (gnomAD/1000G population filter) and TMB.
-variant_annotation_data: "/staging/human/reference/hg38/annotation_data_files"
+# for germline tagging (gnomAD/1000G population filter) and TMB. Must match the
+# versions DRAGEN 4.4.7 pins in resources/annotation/tmb_annotations_GRCh38.json
+# (trimmed gnomAD 4.1, 1000G Ph3, COSMIC 99, ClinVar 20240902, Ensembl 112).
+# The shared annotation_data_files (ICA 3.26, newer) is rejected. Fetched with:
+#   /opt/dragen/4.4.7/share/nirvana/DataManager download -r GRCh38 -d <dir> \
+#     --versions-config /opt/dragen/4.4.7/resources/annotation/tmb_annotations_GRCh38.json
+variant_annotation_data: "/staging/human/reference/hg38/dragen_resources/tmb_annotations_GRCh38"
 enable_somatic_sv: true
 enable_somatic_cnv: true       # self-normalized; add pop BAF VCF below for tumor-only BAF
 enable_hrd: true               # requires somatic CNV
