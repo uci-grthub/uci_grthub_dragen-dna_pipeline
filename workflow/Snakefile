@@ -49,6 +49,11 @@ EXTRA_OUTPUTS = {
 # ---- gene-panel variant extraction paths ----
 PANEL = config["panel_name"]
 PANEL_BED = os.path.join(RESULTS, PANEL + "_genes.bed")
+PANEL_GENES_BED = os.path.join(RESULTS, PANEL + "_genes.named.bed")
+PANEL_SUBSET = os.path.join(RESULTS, "panel_subsets", "{sample}." + PANEL + ".vcf.gz")
+PANEL_CNV_TSV = os.path.join(RESULTS, "annot", PANEL + "_gene_cnv.tsv")
+# tumor_only: the panel reads one calibration variant's calls
+PANEL_CALIB = config["panel_calibration"]
 PANEL_VCF = os.path.join(RESULTS, PANEL + "_variants.vcf.gz")
 PANEL_SITES = os.path.join(RESULTS, "annot", PANEL + "_sites.vcf.gz")
 PANEL_JSON = os.path.join(RESULTS, "annot", PANEL + "_sites.json.gz")
@@ -58,11 +63,6 @@ PANEL_REPORT_MD = os.path.join(RESULTS, PANEL + "_report.md")
 PANEL_REPORT = os.path.join(RESULTS, PANEL + "_report.pdf")
 PIPELINE_REPORT_MD = os.path.join(RESULTS, "pipeline_report.md")
 PIPELINE_REPORT = os.path.join(RESULTS, "pipeline_report.pdf")
-if MODE == "tumor_only" and config["enable_panel"]:
-    raise ValueError(
-        "enable_panel is not yet wired to tumor_only outputs (it reads the "
-        "germline annotated VCFs); set enable_panel: false for tumor_only."
-    )
 
 CALIBS = config["somatic_calibrations"]
 for _c in CALIBS:
@@ -463,6 +463,7 @@ rule panel_bed:
         csv=config["panel_csv"],
     output:
         bed=PANEL_BED,
+        genes=PANEL_GENES_BED,
     log:
         os.path.join(LOGDIR, "panel_bed.log"),
     benchmark:
@@ -486,38 +487,125 @@ rule panel_bed:
                     print $1"\t"s"\t"e"\t"name
                 }}
             }}' {input.csv} <(zcat {input.gtf}) \
-            | sort -k1,1 -k2,2n \
-            | bedtools merge -i - >{output.bed}
+            | sort -k1,1 -k2,2n >{output.genes}
+        bedtools merge -i {output.genes} >{output.bed}
         test -s {output.bed}
         """
 
 
-# Subset one sample's annotated VCF to the panel regions. -T streams (no index
-# on the input needed); the annotated VCFs ship without a .tbi.
-rule panel_subset:
-    input:
-        vcf=os.path.join(GERMLINE_OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
-        bed=PANEL_BED,
-    output:
-        vcf=os.path.join(RESULTS, "panel_subsets", "{sample}." + PANEL + ".vcf.gz"),
-        tbi=os.path.join(RESULTS, "panel_subsets", "{sample}." + PANEL + ".vcf.gz.tbi"),
-    log:
-        os.path.join(LOGDIR, "panel_subset", "{sample}.log"),
-    benchmark:
-        os.path.join(BENCHDIR, "panel_subset", "{sample}.tsv")
-    shell:
-        r"""
-        exec 2>{log}
-        bcftools view -T {input.bed} {input.vcf} -Oz -o {output.vcf}
-        tabix -f -p vcf {output.vcf}
-        """
+# Panel subset per sample.
+#   germline:   subset the genome-wide Nirvana-annotated VCF.
+#   tumor_only: subset the raw somatic VCF of calibration variant
+#               panel_calibration, then Nirvana-annotate only that subset
+#               (minutes instead of annotating ~5M somatic records).
+# -T streams (no index on the input needed).
+if MODE == "germline":
+
+    rule panel_subset:
+        input:
+            vcf=os.path.join(GERMLINE_OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
+            bed=PANEL_BED,
+        output:
+            vcf=PANEL_SUBSET,
+            tbi=PANEL_SUBSET + ".tbi",
+        log:
+            os.path.join(LOGDIR, "panel_subset", "{sample}.log"),
+        benchmark:
+            os.path.join(BENCHDIR, "panel_subset", "{sample}.tsv")
+        shell:
+            r"""
+            exec 2>{log}
+            bcftools view -T {input.bed} {input.vcf} -Oz -o {output.vcf}
+            tabix -f -p vcf {output.vcf}
+            """
+
+else:
+
+    rule panel_subset_raw:
+        input:
+            vcf=os.path.join(
+                SOMATIC_OUTDIR,
+                PANEL_CALIB,
+                "{sample}",
+                "{sample}.hard-filtered.vcf.gz",
+            ),
+            bed=PANEL_BED,
+        output:
+            vcf=os.path.join(
+                RESULTS, "panel_subsets", "{sample}." + PANEL + ".raw.vcf.gz"
+            ),
+        log:
+            os.path.join(LOGDIR, "panel_subset_raw", "{sample}.log"),
+        shell:
+            r"""
+            exec 2>{log}
+            bcftools view -T {input.bed} {input.vcf} -Oz -o {output.vcf}
+            """
+
+    rule panel_subset:
+        input:
+            vcf=os.path.join(
+                RESULTS, "panel_subsets", "{sample}." + PANEL + ".raw.vcf.gz"
+            ),
+        output:
+            vcf=PANEL_SUBSET,
+            tbi=PANEL_SUBSET + ".tbi",
+        log:
+            os.path.join(LOGDIR, "panel_subset", "{sample}.log"),
+        benchmark:
+            os.path.join(BENCHDIR, "panel_subset", "{sample}.tsv")
+        params:
+            bin=config["nirvana_bin"],
+            cache=config["nirvana_cache"],
+            dat=config["nirvana_dat"],
+            sd=config["nirvana_sd"],
+            out_prefix=lambda wc: PANEL_SUBSET.format(sample=wc.sample)[
+                : -len(".vcf.gz")
+            ],
+        shell:
+            r"""
+            exec 2>{log}
+            {params.bin} -c {params.cache} -r {params.dat} --sd {params.sd} \
+                --output-format vcf -i {input.vcf} -o {params.out_prefix}
+            tabix -f -p vcf {output.vcf}
+            """
+
+    # Copy ratio of every CNV segment overlapping each panel gene (calls of
+    # panel_calibration). Tumor-only purity is often not estimated, so the
+    # segment mean (SM, 1.0 = no change) is reported, not an integer CN.
+    rule panel_cnv:
+        input:
+            cnv=expand(
+                os.path.join(
+                    SOMATIC_OUTDIR, PANEL_CALIB, "{sample}", "{sample}.cnv.vcf.gz"
+                ),
+                sample=SAMPLES,
+            ),
+            genes=PANEL_GENES_BED,
+        output:
+            tsv=PANEL_CNV_TSV,
+        log:
+            os.path.join(LOGDIR, "panel_cnv.log"),
+        shell:
+            r"""
+            exec 2>{log}
+            : >{output.tsv}
+            for f in {input.cnv}; do
+                s=$(bcftools query -l "$f")
+                bcftools query -f '%CHROM\t%POS0\t%INFO/END\t%ALT\t%FILTER\t[%SM]\n' "$f" \
+                    | bedtools intersect -wa -wb -a {input.genes} -b - \
+                    | awk -F'\t' -v S="$s" 'BEGIN {{OFS="\t"}}
+                        {{ alt = ($8 == "." ? "REF" : $8); gsub(/[<>]/, "", alt)
+                           print $4, S, $5, $6, $7, alt, $9, $10 }}' >>{output.tsv}
+            done
+            """
 
 
 # Merge per-sample panel subsets into one multi-sample VCF.
 rule panel_merge:
     input:
         vcfs=expand(
-            os.path.join(RESULTS, "panel_subsets", "{sample}." + PANEL + ".vcf.gz"),
+            PANEL_SUBSET,
             sample=SAMPLES,
         ),
     output:
@@ -595,6 +683,8 @@ rule panel_annotate:
 rule panel_db:
     input:
         vcf=PANEL_VCF,
+        subsets=expand(PANEL_SUBSET, sample=SAMPLES),
+        cnv=[PANEL_CNV_TSV] if MODE == "tumor_only" else [],
         json=PANEL_JSON,
         csv=config["panel_csv"],
         script="src/panel_tables.py",
@@ -609,15 +699,23 @@ rule panel_db:
         atsv=os.path.join(RESULTS, "annot", PANEL + "_annotations.tsv"),
         gtsv=os.path.join(RESULTS, "annot", PANEL + "_genes.tsv"),
         ktsv=os.path.join(RESULTS, "annot", PANEL + "_key_variants.tsv"),
+        ctsv=PANEL_CNV_TSV if MODE == "tumor_only" else "/dev/null",
+        mode=MODE,
+        # germline VCFs have no GermlineStatus INFO tag
+        gstatus="%INFO/GermlineStatus" if MODE == "tumor_only" else ".",
     shell:
         r"""
         exec 2>{log}
         # panel metadata + a-priori (gene, rsID) pairs from the curated CSV
         python3 {input.script} {input.csv} {params.gtsv} {params.ktsv}
 
-        # per-sample consequence rows (panel genes only, carriers only)
-        bcftools +split-vep {input.vcf} -d \
-            -f '[%CHROM\t%POS\t%REF\t%ALT\t%SAMPLE\t%GT\t%DP\t%GeneSymbol\t%GeneNcbiId\t%Feature\t%Canonical\t%Consequence\t%Impact\t%BioType\t%HGVSc\t%HGVSp\t%VariantId\n]' \
+        # per-sample consequence rows (panel genes only, carriers only). Read
+        # each sample's subset (not the merge) so FILTER / GermlineStatus stay
+        # per sample.
+        for f in {input.subsets}; do
+            bcftools +split-vep "$f" -d \
+                -f '[%CHROM\t%POS\t%REF\t%ALT\t%SAMPLE\t%GT\t%DP\t%GeneSymbol\t%GeneNcbiId\t%Feature\t%Canonical\t%Consequence\t%Impact\t%BioType\t%HGVSc\t%HGVSp\t%VariantId\t%FILTER\t%AF\t{params.gstatus}\n]'
+        done \
             | awk -F'\t' 'NR==FNR {{
                           sub(/\r$/,""); split($0, c, ",")
                           if (c[1]!="" && c[1]!~/^#/ && c[1]!="gene_symbol") g[c[1]]=1
@@ -651,7 +749,12 @@ CREATE TABLE panel_variants(
   sample TEXT, gt TEXT, dp INTEGER,
   gene_symbol TEXT, gene_ncbi_id TEXT, feature TEXT, canonical TEXT,
   consequence TEXT, impact TEXT, biotype TEXT, hgvsc TEXT, hgvsp TEXT,
-  variant_id TEXT
+  variant_id TEXT,
+  filter TEXT, vaf REAL, germline_status TEXT
+);
+CREATE TABLE panel_gene_cnv(
+  gene_symbol TEXT, sample TEXT, seg_chrom TEXT, seg_start INTEGER, seg_end INTEGER,
+  cnv_call TEXT, cnv_filter TEXT, copy_ratio REAL
 );
 CREATE TABLE variant_annotations(
   variant_id TEXT PRIMARY KEY, rsid TEXT, gnomad_af REAL, gnomad_hom INTEGER,
@@ -670,6 +773,7 @@ CREATE TABLE panel_key_variants(
 .import {params.atsv} variant_annotations
 .import {params.gtsv} panel_genes
 .import {params.ktsv} panel_key_variants
+.import {params.ctsv} panel_gene_cnv
 CREATE INDEX idx_gene   ON panel_variants(gene_symbol);
 CREATE INDEX idx_sample ON panel_variants(sample);
 CREATE INDEX idx_impact ON panel_variants(impact);
@@ -688,10 +792,34 @@ CREATE VIEW panel_annotated AS
          ) THEN 1 ELSE 0 END AS is_key_variant,
          g.category AS gene_category,
          g.priority AS gene_priority,
-         g.exome_capture_note
+         g.exome_capture_note,
+         g.mechanism AS gene_mechanism,
+         CASE
+           WHEN '{params.mode}' = 'germline' THEN 'germline call'
+           WHEN v.germline_status LIKE 'Somatic%' THEN 'somatic'
+           WHEN v.germline_status = 'Germline_Proxi'
+             THEN 'unresolved (VAF-based germline tag; organoid ~100% tumor)'
+           WHEN v.germline_status = 'Germline_DB' THEN 'likely germline (population DB)'
+           ELSE 'untagged'
+         END AS variant_class
   FROM panel_variants v
   LEFT JOIN variant_annotations a USING(variant_id)
   LEFT JOIN panel_genes g ON g.gene_symbol = v.gene_symbol;
+
+-- Reviewer-facing summary: one row per (variant x sample) on the canonical
+-- Ensembl transcript, PASS only, protein-altering (high/moderate impact), not
+-- explained by a common population allele.
+CREATE VIEW pathway_hits AS
+  SELECT gene_symbol, gene_category AS pathway, gene_mechanism AS role, sample,
+         chrom, pos, ref, alt, gt, dp, vaf, filter, germline_status, variant_class,
+         consequence, impact, hgvsc, hgvsp, rsid, gnomad_af, clinvar_significance,
+         revel, is_key_variant
+  FROM panel_annotated
+  WHERE filter = 'PASS' AND impact IN ('high', 'moderate')
+    AND feature LIKE 'ENST%' AND canonical = 'True'
+    AND variant_class <> 'likely germline (population DB)'
+    AND (gnomad_af IS NULL OR gnomad_af = '' OR gnomad_af < 0.001)
+  ORDER BY gene_category, gene_symbol, sample;
 
 -- One row per a-priori rsID: was it called in this cohort, and in how many samples.
 -- Rows with status 'not called' mean the site is absent from the cohort VCF — read

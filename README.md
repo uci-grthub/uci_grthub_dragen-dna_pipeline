@@ -66,8 +66,8 @@ GENCODE GTF. Each annotated VCF is then subset to those genes, and the subsets
 are merged across samples. The merged sites are annotated once with Nirvana
 JSON (gnomAD, ClinVar, dbSNP, REVEL, phyloP) and loaded into:
 
-- `results/<panel_name>_variants.sqlite` (+ `.xlsx`, `.vcf.gz`)
-- `results/<panel_name>_report.pdf`
+- `results/<mode>/<panel_name>_variants.sqlite` (+ `.xlsx`, `.vcf.gz`; tumor_only adds `pathway_hits` and `panel_gene_cnv`)
+- `results/<mode>/<panel_name>_report.pdf`
 
 The panel is defined by three config keys:
 

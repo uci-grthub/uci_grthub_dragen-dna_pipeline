@@ -109,16 +109,20 @@ msi_coverage_threshold: 40
 #   exome_capture_note (free-text coverage/recoverability caveat).
 # To switch panels: point panel_csv at the new CSV, change panel_name and
 # panel_description. Outputs for different panel_name values do not collide.
-enable_panel: false
-panel_csv: "data/pain_gene_panel_from_zeev_kain.csv"
-panel_name: "pain"          # basename for results/<panel_name>_*; shown in reports
+enable_panel: true
+panel_csv: "config/panels/pi3k_rasmapk_panel.csv"
+panel_name: "pi3k_rasmapk"  # basename for results/<mode>/<panel_name>_*; shown in reports
+# tumor_only: which calibration variant (output/somatic/<calib>/) the panel reads
+panel_calibration: "auto"
 # One paragraph (Markdown ok) describing the panel's origin and scope; printed
 # in the panel PDF report and the xlsx README sheet.
 panel_description: >-
-  A-priori pain / analgesia candidate-gene list curated by Zeev Kain (copied
-  from the KainZ exome project): opioid pharmacokinetics / pharmacodynamics,
-  pain sensitivity and nociception, chronic postsurgical pain,
-  neuroinflammation and reward-axis genes.
+  Oncogenes and tumor suppressors of the PI3K and RAS/MAPK pathways plus
+  upstream receptor tyrosine kinases, assembled for the reviewer request on
+  endometrial cancer organoids (PT2, PT5), plus endometrial molecular-subtype
+  context genes (POLE, TP53, mismatch repair, ARID1A, CTNNB1). Hotspot rsIDs
+  in key_variants: PIK3CA E545K/E542K/H1047R, AKT1 E17K, KRAS G12/G13,
+  NRAS Q61, BRAF V600E.
 panel_gene_padding: 0       # bases added each side of each gene interval
 # GENCODE v47 GTF (GRCh38, chr-prefixed contigs; matches the VCF naming).
 gene_gtf: "/staging/human/reference/hg38/gencode/gencode.v47.primary_assembly.annotation.gtf.gz"

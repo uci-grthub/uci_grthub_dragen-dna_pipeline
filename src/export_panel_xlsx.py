@@ -32,6 +32,8 @@ def scalar(sql):
 
 # Deliverables first, raw tables last; anything new lands after the known names.
 SHEET_ORDER = [
+    "pathway_hits",
+    "panel_gene_cnv",
     "panel_annotated",
     "key_variant_status",
     "key_variant_carriers",
