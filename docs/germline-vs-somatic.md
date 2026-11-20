@@ -46,6 +46,43 @@ This is the part that matters for the PI3K / RAS-MAPK results.
   for the missing matched normal.
 - Output VCF carries FILTER status and per-variant allele fractions; no
   germline-style genotypes, no gVCF.
+- Germline tagging marks variants with INFO `GermlineStatus`
+  (`Germline_DB`, `Germline_Proxi`, `Somatic`, `Somatic_Hotspot`, ...); it
+  does not change FILTER. Somatic candidates = PASS **and**
+  `GermlineStatus=Somatic*`.
+- Germline-tagging caveat for organoids: they are ~100% tumor, so clonal
+  heterozygous somatic variants sit near 50% VAF like germline ones. The TMB
+  proxy filter (`--tmb-enable-proxi-filter`) tags such calls
+  `Germline_Proxi` (24k PASS calls in PT5). The panel step must report
+  `Germline_Proxi` calls in pathway genes as "somatic or germline,
+  unresolved", not drop them.
+
+### Two somatic calibration variants
+
+The somatic run is two DRAGEN passes: `dragen_somatic_align` (map/align,
+coverage metrics; shared, `output/somatic/align/<sample>/`) then
+`dragen_somatic` (calling from that BAM), once per entry in
+`somatic_calibrations`, into `output/somatic/<calib>/<sample>/`. In between,
+`somatic_params` writes `<sample>.somatic_params.yaml` with the flags used:
+
+| | `default` | `auto` |
+|---|---|---|
+| `--vc-callability-tumor-thresh` | DRAGEN default (50 reads) | clamp(round(0.5 × median autosomal cov), 10, 50); PT5 13, PT2 14 |
+| `--cnv-interval-width` | DRAGEN default (1000 bp) | clamp(ceil_1kb(1000 × 100 / median), 1000, 10000); PT5 and PT2 4000 bp |
+| `--vc-germline-tag-hotspots` | DRAGEN default | `false` (COSMIC hotspots never tagged germline) |
+
+Why: DRAGEN's defaults assume ~100x tumors.
+- Callability 50 on PT5 (median 25x) left 5 Mb of genome and 0.04 Mb of the
+  TMB region callable, so TMB came out as 0. The threshold does **not**
+  change calls: PT2 and PT5 VCFs at 50 vs 13/14 have identical variant
+  counts. It changes only callable-region BEDs and TMB.
+- 1 kb CNV bins at 25x: `WARNING: Autosomal median is too low. Consider
+  increasing --cnv-interval-width`, then the model plausibility check failed
+  (`ModelCallsTooManyHomdels`) and the CNV VCF had 0 records (purity NA,
+  ploidy 0, no HRD).
+
+The `default` results were produced by the first one-pass run (same reads,
+same reference, DRAGEN defaults) and moved into `output/somatic/default/`.
 
 ## CNV
 

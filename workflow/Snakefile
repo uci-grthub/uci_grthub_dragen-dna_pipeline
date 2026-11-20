@@ -4,9 +4,25 @@ import os
 configfile: "config/config.yaml"
 
 
-OUTDIR = config["outdir"]
-LOGDIR = os.path.join(OUTDIR, "logs")
-BENCHDIR = os.path.join(OUTDIR, "benchmarks")
+# ---- analysis mode: must be chosen explicitly (no default) ----
+# Set `mode:` in config/config.yaml or pass `--config mode=germline|tumor_only`.
+MODES = ("germline", "tumor_only")
+MODE = config.get("mode") or ""
+if MODE not in MODES:
+    raise ValueError(
+        f"config 'mode' must be one of {MODES}, got {MODE!r}. Choose explicitly: "
+        "set `mode:` in config/config.yaml or run with `--config mode=<mode>`."
+    )
+
+# ---- per-mode output roots ----
+# Each mode writes its own tree (samples, logs, benchmarks, multiqc, versions)
+# and its own results/<mode>/ directory, so the two never collide.
+GERMLINE_OUTDIR = config["germline_outdir"]
+SOMATIC_OUTDIR = config["somatic_outdir"]
+MODE_ROOT = GERMLINE_OUTDIR if MODE == "germline" else SOMATIC_OUTDIR
+LOGDIR = os.path.join(MODE_ROOT, "logs")
+BENCHDIR = os.path.join(MODE_ROOT, "benchmarks")
+RESULTS = os.path.join("results", "germline" if MODE == "germline" else "somatic")
 
 # ---- load sample sheet (sample,R1,R2; # comments ignored) ----
 SAMPLES = {}
@@ -32,7 +48,6 @@ EXTRA_OUTPUTS = {
 }
 # ---- gene-panel variant extraction paths ----
 PANEL = config["panel_name"]
-RESULTS = "results"
 PANEL_BED = os.path.join(RESULTS, PANEL + "_genes.bed")
 PANEL_VCF = os.path.join(RESULTS, PANEL + "_variants.vcf.gz")
 PANEL_SITES = os.path.join(RESULTS, "annot", PANEL + "_sites.vcf.gz")
@@ -43,32 +58,31 @@ PANEL_REPORT_MD = os.path.join(RESULTS, PANEL + "_report.md")
 PANEL_REPORT = os.path.join(RESULTS, PANEL + "_report.pdf")
 PIPELINE_REPORT_MD = os.path.join(RESULTS, "pipeline_report.md")
 PIPELINE_REPORT = os.path.join(RESULTS, "pipeline_report.pdf")
-SOMATIC_OUTDIR = config["somatic_outdir"]
-
-# ---- analysis mode: must be chosen explicitly (no default) ----
-# Set `mode:` in config/config.yaml or pass `--config mode=germline|tumor_only`.
-MODES = ("germline", "tumor_only")
-MODE = config.get("mode") or ""
-if MODE not in MODES:
-    raise ValueError(
-        f"config 'mode' must be one of {MODES}, got {MODE!r}. Choose explicitly: "
-        "set `mode:` in config/config.yaml or run with `--config mode=<mode>`."
-    )
 if MODE == "tumor_only" and config["enable_panel"]:
     raise ValueError(
         "enable_panel is not yet wired to tumor_only outputs (it reads the "
         "germline annotated VCFs); set enable_panel: false for tumor_only."
     )
 
-MODE_VCFS = {
-    "germline": os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
-    "tumor_only": os.path.join(
-        SOMATIC_OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"
-    ),
-}
-MODE_TARGETS = expand(MODE_VCFS[MODE], sample=SAMPLES) + (
-    [PIPELINE_REPORT] if MODE == "germline" else []
-)
+CALIBS = config["somatic_calibrations"]
+for _c in CALIBS:
+    if _c not in ("default", "auto"):
+        raise ValueError(
+            f"somatic_calibrations entries must be default|auto, got {_c!r}"
+        )
+if MODE == "germline":
+    MODE_TARGETS = expand(
+        os.path.join(GERMLINE_OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
+        sample=SAMPLES,
+    ) + [PIPELINE_REPORT]
+else:
+    MODE_TARGETS = expand(
+        os.path.join(
+            SOMATIC_OUTDIR, "{calib}", "{sample}", "{sample}.hard-filtered.vcf.gz"
+        ),
+        calib=CALIBS,
+        sample=SAMPLES,
+    )
 
 
 def somatic_flags():
@@ -106,8 +120,8 @@ def somatic_flags():
 
 rule all:
     input:
-        os.path.join(OUTDIR, "versions.yaml"),
-        os.path.join(OUTDIR, "multiqc", "multiqc_report.html"),
+        os.path.join(MODE_ROOT, "versions.yaml"),
+        os.path.join(MODE_ROOT, "multiqc", "multiqc_report.html"),
         MODE_TARGETS,
         # gene-panel extraction only when enabled
         [PANEL_DB, PANEL_XLSX, PANEL_VCF, PANEL_REPORT]
@@ -118,7 +132,7 @@ rule all:
 # Record live tool/reference versions for provenance.
 rule versions:
     output:
-        os.path.join(OUTDIR, "versions.yaml"),
+        os.path.join(MODE_ROOT, "versions.yaml"),
     log:
         os.path.join(LOGDIR, "versions.log"),
     benchmark:
@@ -145,12 +159,12 @@ rule dragen:
         r2=lambda wc: SAMPLES[wc.sample][1],
     output:
         **{
-            k: os.path.join(OUTDIR, "{sample}", "{sample}" + suffix)
+            k: os.path.join(GERMLINE_OUTDIR, "{sample}", "{sample}" + suffix)
             for k, (flag, suffix) in EXTRA_OUTPUTS.items()
             if config[flag]
         },
-        bam=os.path.join(OUTDIR, "{sample}", "{sample}.bam"),
-        vcf=os.path.join(OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"),
+        bam=os.path.join(GERMLINE_OUTDIR, "{sample}", "{sample}.bam"),
+        vcf=os.path.join(GERMLINE_OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"),
     log:
         os.path.join(LOGDIR, "dragen", "{sample}.log"),
     benchmark:
@@ -185,7 +199,7 @@ rule dragen:
                 else []
             )
         ),
-        outdir=lambda wc: os.path.join(OUTDIR, wc.sample),
+        outdir=lambda wc: os.path.join(GERMLINE_OUTDIR, wc.sample),
     shell:
         r"""
         exec 2>{log}
@@ -216,21 +230,35 @@ rule dragen:
         """
 
 
-# DRAGEN somatic tumor-only WGS ("DNA Somatic Tumor-Only Solid WGS" recipe).
-# Organoids have no matched normal: germline tagging against population DBs
-# (--variant-annotation-data) stands in for the normal. Re-maps on the linear
-# hashtable; SNV/indel + optional SV / CNV (+HRD) / TMB / MSI in one run.
-# Serialized with the germline rule via resources: dragen=1.
-rule dragen_somatic:
+# ---- tumor_only: align -> per-variant parameters -> call ----
+# DRAGEN somatic tumor-only WGS ("DNA Somatic Tumor-Only Solid WGS" recipe),
+# split in two DRAGEN passes so coverage-dependent parameters can be set from
+# the sample's measured coverage (only known after mapping). Pass 1 is shared;
+# pass 2 runs once per calibration variant in somatic_calibrations:
+#   default -> DRAGEN defaults (callability 50, CNV bins 1 kb)
+#   auto    -> callability threshold + CNV bin width scaled to coverage,
+#              and COSMIC hotspots never tagged germline
+SOMATIC_ALIGN = os.path.join(SOMATIC_OUTDIR, "align", "{sample}")
+SOMATIC_CALLS = os.path.join(SOMATIC_OUTDIR, "{calib}", "{sample}")
+
+
+wildcard_constraints:
+    calib="default|auto",
+
+
+# Pass 1: trim, map/align on the linear hashtable, sort, mark duplicates.
+# Tumor input with no normal; no callers. Emits the tumor BAM + coverage metrics.
+rule dragen_somatic_align:
     input:
         r1=lambda wc: SAMPLES[wc.sample][0],
         r2=lambda wc: SAMPLES[wc.sample][1],
     output:
-        vcf=os.path.join(SOMATIC_OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"),
+        bam=os.path.join(SOMATIC_ALIGN, "{sample}_tumor.bam"),
+        cov=os.path.join(SOMATIC_ALIGN, "{sample}.wgs_coverage_metrics.csv"),
     log:
-        os.path.join(LOGDIR, "dragen_somatic", "{sample}.log"),
+        os.path.join(LOGDIR, "dragen_somatic_align", "{sample}.log"),
     benchmark:
-        os.path.join(BENCHDIR, "dragen_somatic", "{sample}.tsv")
+        os.path.join(BENCHDIR, "dragen_somatic_align", "{sample}.tsv")
     resources:
         dragen=1,
     params:
@@ -241,16 +269,10 @@ rule dragen_somatic:
         adapter_r2=config["trim_adapter_r2"],
         min_q=config["trim_min_quality"],
         min_len=config["trim_min_length"],
-        noise=config["vc_systematic_noise"],
-        flags=somatic_flags(),
-        outdir=lambda wc: os.path.join(SOMATIC_OUTDIR, wc.sample),
+        outdir=lambda wc: SOMATIC_ALIGN.format(sample=wc.sample),
     shell:
         r"""
         exec 2>{log}
-        if [ ! -s "{params.noise}" ]; then
-            echo "vc_systematic_noise unset or missing: required for tumor-only WGS" >&2
-            exit 1
-        fi
         mkdir -p {params.outdir}
         {params.dragen} -f \
             -r {params.ref} \
@@ -265,23 +287,126 @@ rule dragen_somatic:
             --output-format BAM \
             --enable-sort true \
             --enable-duplicate-marking true \
-            --enable-variant-caller true \
+            --enable-variant-caller false \
             --read-trimmers adapter,quality \
             --trim-adapter-read1 {params.adapter_r1} \
             --trim-adapter-read2 {params.adapter_r2} \
             --trim-min-quality {params.min_q} \
             --trim-min-length {params.min_len} \
+            --enable-metrics-json true
+        """
+
+
+# Per-variant DRAGEN parameters from the measured median autosomal coverage.
+#   auto:    vc-callability-tumor-thresh = clamp(round(frac * median), min, max)
+#            cnv-interval-width = clamp(ceil_1kb(1000 * cnv_ref_cov / median),
+#                                       1000, cnv_interval_width_max)
+#            DRAGEN's defaults (50 reads, 1 kb bins) assume ~100x tumors; at
+#            ~25x almost nothing is callable (TMB = 0) and CNV segmentation
+#            aborts ("Autosomal median is too low").
+#   default: no overrides (flags omitted).
+# Writes <calib>/<sample>/<sample>.somatic_params.yaml; dragen_flags is the
+# literal flag string pass 2 appends.
+rule somatic_params:
+    input:
+        cov=os.path.join(SOMATIC_ALIGN, "{sample}.wgs_coverage_metrics.csv"),
+    output:
+        yaml=os.path.join(SOMATIC_CALLS, "{sample}.somatic_params.yaml"),
+    log:
+        os.path.join(LOGDIR, "somatic_params", "{calib}.{sample}.log"),
+    params:
+        frac=config["callability_fraction"],
+        lo=config["callability_min"],
+        hi=config["callability_max"],
+        thresh_ov=config["callability_override"],
+        ref_cov=config["cnv_ref_cov"],
+        wmax=config["cnv_interval_width_max"],
+        width_ov=config["cnv_interval_width_override"],
+        cnv=int(config["enable_somatic_cnv"]),
+    shell:
+        r"""
+        exec 2>{log}
+        gawk -F, -v CALIB={wildcards.calib} -v F={params.frac} -v LO={params.lo} \
+            -v HI={params.hi} -v TOV="{params.thresh_ov}" -v REF={params.ref_cov} \
+            -v WMAX={params.wmax} -v WOV="{params.width_ov}" -v CNV={params.cnv} '
+            $3 == "Median autosomal coverage over genome" {{ med = $4 }}
+            END {{
+                if (med == "" || med + 0 <= 0) {{
+                    print "median autosomal coverage not found" > "/dev/stderr"; exit 1
+                }}
+                printf "calibration: %s\nmedian_cov: %s\n", CALIB, med
+                if (CALIB == "default") {{
+                    print "callability_thresh: \"\""
+                    print "cnv_interval_width: \"\""
+                    print "dragen_flags: \"\""
+                    exit 0
+                }}
+                if (TOV != "") t = TOV + 0
+                else {{
+                    t = int(F * med + 0.5); if (t < LO) t = LO; if (t > HI) t = HI
+                }}
+                if (WOV != "") w = WOV + 0
+                else {{
+                    w = 1000 * REF / med; w = (w == int(w / 1000) * 1000) ? w : (int(w / 1000) + 1) * 1000
+                    if (w < 1000) w = 1000; if (w > WMAX) w = WMAX
+                }}
+                flags = sprintf("--vc-callability-tumor-thresh %d --vc-germline-tag-hotspots false", t)
+                if (CNV) flags = flags sprintf(" --cnv-interval-width %d", w)
+                printf "callability_thresh: %d\ncnv_interval_width: %d\n", t, w
+                printf "dragen_flags: \"%s\"\n", flags
+            }}' {input.cov} >{output.yaml}
+        """
+
+
+# Pass 2: somatic calling from the shared pass-1 BAM (no re-mapping): SNV/indel
+# with germline tagging + systematic noise, optional SV / CNV (+HRD) / TMB / MSI,
+# plus the variant's dragen_flags. Serialized via dragen=1.
+rule dragen_somatic:
+    input:
+        bam=os.path.join(SOMATIC_ALIGN, "{sample}_tumor.bam"),
+        yaml=os.path.join(SOMATIC_CALLS, "{sample}.somatic_params.yaml"),
+    output:
+        vcf=os.path.join(SOMATIC_CALLS, "{sample}.hard-filtered.vcf.gz"),
+    log:
+        os.path.join(LOGDIR, "dragen_somatic", "{calib}.{sample}.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "dragen_somatic", "{calib}.{sample}.tsv")
+    resources:
+        dragen=1,
+    params:
+        dragen=config["dragen_bin"],
+        ref=config["somatic_reference"],
+        noise=config["vc_systematic_noise"],
+        flags=somatic_flags(),
+        outdir=lambda wc: SOMATIC_CALLS.format(calib=wc.calib, sample=wc.sample),
+    shell:
+        r"""
+        exec 2>{log}
+        if [ ! -s "{params.noise}" ]; then
+            echo "vc_systematic_noise unset or missing: required for tumor-only WGS" >&2
+            exit 1
+        fi
+        extra=$(gawk -F'"' '/^dragen_flags:/ {{ print $2 }}' {input.yaml})
+        echo "calibration={wildcards.calib} extra flags: $extra" >&2
+        {params.dragen} -f \
+            -r {params.ref} \
+            --tumor-bam-input {input.bam} \
+            --output-directory {params.outdir} \
+            --output-file-prefix {wildcards.sample} \
+            --enable-map-align false \
+            --enable-variant-caller true \
             --enable-metrics-json true \
-            {params.flags}
+            {params.flags} \
+            $extra
         """
 
 
 # Nirvana annotation of the hard-filtered VCF (GRCh38), emitting an annotated VCF.
 rule nirvana:
     input:
-        vcf=os.path.join(OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"),
+        vcf=os.path.join(GERMLINE_OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"),
     output:
-        vcf=os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
+        vcf=os.path.join(GERMLINE_OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
     log:
         os.path.join(LOGDIR, "nirvana", "{sample}.log"),
     benchmark:
@@ -292,7 +417,9 @@ rule nirvana:
         dat=config["nirvana_dat"],
         sd=config["nirvana_sd"],
         fmt=config["nirvana_output_format"],
-        out_prefix=lambda wc: os.path.join(OUTDIR, wc.sample, wc.sample + ".annotated"),
+        out_prefix=lambda wc: os.path.join(
+            GERMLINE_OUTDIR, wc.sample, wc.sample + ".annotated"
+        ),
     shell:
         r"""
         exec 2>{log}
@@ -307,14 +434,14 @@ rule multiqc:
         vcfs=MODE_TARGETS,
         cfg="config/multiqc_config.yaml",
     output:
-        os.path.join(OUTDIR, "multiqc", "multiqc_report.html"),
+        os.path.join(MODE_ROOT, "multiqc", "multiqc_report.html"),
     log:
         os.path.join(LOGDIR, "multiqc.log"),
     benchmark:
         os.path.join(BENCHDIR, "multiqc.tsv")
     params:
-        scan=OUTDIR,
-        outdir=os.path.join(OUTDIR, "multiqc"),
+        scan=MODE_ROOT,
+        outdir=os.path.join(MODE_ROOT, "multiqc"),
     shell:
         r"""
         exec 2>{log}
@@ -369,7 +496,7 @@ rule panel_bed:
 # on the input needed); the annotated VCFs ship without a .tbi.
 rule panel_subset:
     input:
-        vcf=os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
+        vcf=os.path.join(GERMLINE_OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
         bed=PANEL_BED,
     output:
         vcf=os.path.join(RESULTS, "panel_subsets", "{sample}." + PANEL + ".vcf.gz"),
@@ -662,7 +789,7 @@ rule panel_report:
 # pandoc (typst engine) renders it to PDF.
 rule pipeline_report:
     input:
-        versions=os.path.join(OUTDIR, "versions.yaml"),
+        versions=os.path.join(MODE_ROOT, "versions.yaml"),
         samples=config["samples_csv"],
         script="src/make_pipeline_report.sh",
     output:
@@ -673,7 +800,7 @@ rule pipeline_report:
     benchmark:
         os.path.join(BENCHDIR, "pipeline_report.tsv")
     params:
-        outdir=OUTDIR,
+        outdir=GERMLINE_OUTDIR,
         trim_q=config["trim_min_quality"],
         trim_len=config["trim_min_length"],
         cnv=config["enable_cnv"],

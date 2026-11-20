@@ -1,7 +1,8 @@
 # uci_grthub_dragen-dna_pipeline
 
-DRAGEN germline whole-genome sequencing (WGS) analysis, driven by Snakemake
-(`workflow/Snakefile`, config in `config/config.yaml`) and run through pixi.
+DRAGEN whole-genome sequencing (WGS) analysis in germline or somatic
+tumor-only mode, driven by Snakemake (`workflow/Snakefile`, config in
+`config/config.yaml`) and run through pixi.
 The current config and `metadata/metadata.csv` are set up for the
 261118_FrumD_WGS project.
 
@@ -20,10 +21,14 @@ with MultiQC, and a PDF pipeline report is rendered.
 ## Quick start
 
 ```bash
-pixi run samples   # build data/samples.csv from data/FASTQ + metadata/metadata.csv
-pixi run dryrun    # show planned jobs
-pixi run run       # run; DRAGEN jobs serialized (resources: dragen=1)
+pixi run samples            # build data/samples.csv from data/FASTQ + metadata/metadata.csv
+pixi run dryrun-germline    # show planned jobs (or dryrun-tumor-only)
+pixi run run-germline       # run; DRAGEN jobs serialized (resources: dragen=1)
+pixi run run-tumor-only     # somatic tumor-only mode
 ```
+
+`mode` has no default; `pixi run dryrun` / `run` only work once `mode:` is set
+in `config/config.yaml`.
 
 ## Samples
 
@@ -90,7 +95,17 @@ One-off run without editing config: `pixi run snakemake --cores all --resources 
 
 ## Outputs
 
-Per sample, under `output/<sample>/`:
+`mode` (required: `germline` or `tumor_only`) picks the output root. Each
+root holds its own `logs/`, `benchmarks/`, `multiqc/` and `versions.yaml`.
+
+```
+output/germline/<sample>/            mode: germline
+output/somatic/align/<sample>/       mode: tumor_only, shared tumor BAM
+output/somatic/<calib>/<sample>/     mode: tumor_only, calls (calib: default, auto)
+results/germline/, results/somatic/  reports (+ panel)
+```
+
+Germline, per sample under `output/germline/<sample>/`:
 
 - `<sample>.bam` (+ `.bai`) — mapped, deduplicated reads
 - `<sample>.hard-filtered.vcf.gz` — small variants; `.hard-filtered.gvcf.gz` gVCF
@@ -98,11 +113,21 @@ Per sample, under `output/<sample>/`:
 - `<sample>.cnv.vcf.gz`, `<sample>.sv.vcf.gz`, `<sample>.repeats.vcf.gz`
 - star-allele / PGx / targeted-caller outputs, DRAGEN QC metrics
 
-Cohort-level:
+Tumor-only, per sample under `output/somatic/<calib>/<sample>/`:
 
-- `output/multiqc/multiqc_report.html` — aggregated QC
-- `output/versions.yaml` — live tool/reference versions
-- `results/pipeline_report.pdf` — methods + versions + outputs
+- `<sample>.somatic_params.yaml` — callability threshold / CNV bin width used
+- `<sample>.hard-filtered.vcf.gz` — somatic small variants (INFO `GermlineStatus`)
+- `<sample>.cnv.vcf.gz`, `<sample>.sv.vcf.gz`, TMB / HRD metrics,
+  callable-region BEDs
+
+See `docs/germline-vs-somatic.md` for how the two modes and the two
+calibration variants differ.
+
+Cohort-level (per mode root):
+
+- `<root>/multiqc/multiqc_report.html` — aggregated QC
+- `<root>/versions.yaml` — live tool/reference versions
+- `results/germline/pipeline_report.pdf` — methods + versions + outputs
 
 ## Development
 

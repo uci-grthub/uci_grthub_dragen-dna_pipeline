@@ -1,7 +1,7 @@
 # Config for the DRAGEN germline WGS + Nirvana + MultiQC Snakemake workflow.
 
 # Tool / reference versions (provenance record). The `versions` rule also
-# writes the live-detected values to <outdir>/versions.yaml at run time.
+# writes the live-detected values to <mode root>/versions.yaml at run time.
 dragen_version: "4.4.7"
 ica_version: "3.26.0"          # Illumina Connected Annotations (Nirvana)
 hashtable_version: "11"        # hg38 pangenome reference
@@ -20,8 +20,10 @@ mode: ""
 samples_csv: "data/samples.csv"
 metadata_csv: "metadata/metadata.csv"
 
-# Base output directory (one subdirectory per sample is created).
-outdir: "output"
+# Per-mode output roots (samples, logs, benchmarks, multiqc, versions.yaml).
+# Results (reports, panel) go to results/germline/ or results/somatic/.
+germline_outdir: "output/germline"
+somatic_outdir: "output/somatic"
 
 # DRAGEN binary and reference (hg38 pangenome, hashtable v11).
 dragen_bin: "/opt/dragen/4.4.7/bin/dragen"
@@ -38,15 +40,31 @@ emit_gvcf: true        # --vc-emit-ref-confidence GVCF (keeps joint genotyping o
 # ---- mode: tumor_only. DRAGEN somatic tumor-only WGS (recipe: "DNA Somatic Tumor-Only Solid WGS") ----
 # Organoids have no matched normal, so somatic calls come from tumor-only mode.
 # Re-maps from FASTQ on a LINEAR hashtable (DRAGEN recommends linear for
-# somatic; the germline BAMs above are pangenome-aligned). Outputs land in
-# <somatic_outdir>/<sample>/ and do not collide with the germline run.
-somatic_outdir: "output/somatic"
+# somatic; the germline BAMs above are pangenome-aligned). Shared BAM in
+# <somatic_outdir>/align/<sample>/, calls in <somatic_outdir>/<calib>/<sample>/.
 # Illumina prebuilt linear hg38 alt-masked, hashtable v11, CNV-enabled
 # (kmer_cnv.bin, required for tumor-only CNV self-normalization; our own
 # hg38_hash_table_v11 lacks it). Same reference family the Illumina systematic
 # noise baselines were built on.
 somatic_reference: "/staging/human/reference/hg38/hg38-alt_masked.cnv.hla.methyl_cg.methylated_combined.rna-11-r5.0-1"
 vc_target_vaf: 0.03            # recipe default (>= 3% VAF)
+# Pass 2 runs once per calibration variant (outputs output/somatic/<calib>/):
+#   default -> DRAGEN defaults (callability 50 reads, CNV bins 1 kb)
+#   auto    -> per-sample, from median autosomal coverage of the somatic BAM:
+#     callability = clamp(round(callability_fraction * median), min, max)
+#     cnv_interval_width = clamp(ceil_1kb(1000 * cnv_ref_cov / median),
+#                                1000, cnv_interval_width_max)
+#     plus --vc-germline-tag-hotspots false (never tag COSMIC hotspots germline)
+# DRAGEN's defaults assume ~100x tumors; at ~25x the 50-read threshold leaves
+# ~nothing callable (TMB = 0) and 1 kb CNV bins abort segmentation.
+somatic_calibrations: ["default", "auto"]
+callability_fraction: 0.5
+callability_min: 10
+callability_max: 50
+callability_override: ""
+cnv_ref_cov: 100
+cnv_interval_width_max: 10000
+cnv_interval_width_override: ""
 # Nirvana data dir (Cache/ References/ SupplementaryAnnotation/) used by DRAGEN
 # for germline tagging (gnomAD/1000G population filter) and TMB. Must match the
 # versions DRAGEN 4.4.7 pins in resources/annotation/tmb_annotations_GRCh38.json
