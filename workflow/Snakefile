@@ -93,7 +93,7 @@ def somatic_flags():
             f.append("--enable-hrd true")
     if c["enable_tmb"]:
         f.append("--enable-tmb true --tmb-enable-proxi-filter true")
-    if c["msi_microsatellites_file"]:
+    if c["enable_msi"]:
         f += [
             "--msi-command tumor-only",
             f"--msi-microsatellites-file {c['msi_microsatellites_file']}",

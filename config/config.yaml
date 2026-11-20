@@ -50,14 +50,25 @@ enable_somatic_sv: true
 enable_somatic_cnv: true       # self-normalized; add pop BAF VCF below for tumor-only BAF
 enable_hrd: true               # requires somatic CNV
 enable_tmb: true               # + --tmb-enable-proxi-filter (recommended for tumor-only)
-# Resources from Illumina DRAGEN product files (not shipped in /opt/dragen).
-# Empty string = flag omitted. vc_systematic_noise is REQUIRED by the recipe;
-# the dragen_somatic rule refuses to run without it.
-vc_systematic_noise: ""        # WGS SNV systematic-noise BED (hg38)
-sv_systematic_noise: ""        # WGS SV systematic-noise BEDPE (hg38), recommended
-cnv_population_baf_vcf: ""     # population SNP VCF for tumor-only CNV BAF
-msi_microsatellites_file: ""   # MSI sites list; MSI runs only when this is set
-msi_ref_normal: ""             # MSI reference-normal PON (--msi-ref-normal-input)
+# Resources from Illumina DRAGEN product files (not shipped in /opt/dragen),
+# downloaded 2026-11-20 to /staging/human/reference/hg38/dragen_resources/downloads/
+# (archives + MD5SUMS.downloaded) and extracted alongside. Empty string = flag
+# omitted. vc_systematic_noise is REQUIRED by the recipe; the dragen_somatic
+# rule refuses to run without it.
+# Alternative germline-tagging DB if the Nirvana dir above is rejected:
+#   /staging/human/reference/hg38/dragen_resources/germline_tagging/germline_tagging_data-v2.0.bin
+# SNV baseline v2.0.0 (DRAGEN 4.3/4.4): mixed prep, 40 FF samples, 70x.
+vc_systematic_noise: "/staging/human/reference/hg38/dragen_resources/snv/WGS_hg38_v2.0.0_systematic_noise.snv.bed.gz"
+# SV baseline v3.1.0 (DRAGEN 4.4): TruSeq PCR-free 1kg cell lines, 30x; FF + FFPE.
+sv_systematic_noise: "/staging/human/reference/hg38/dragen_resources/sv/WGS_hg38_v3.1.0_systematic_noise.sv.bedpe.gz"
+cnv_population_baf_vcf: "/staging/human/reference/hg38/dragen_resources/cnv/hg38_1000G_phase1.snps.high_confidence.vcf.gz"
+# MSI (microsatellite-files v1.1.1). Off by default: the only WGS normal
+# baseline Illumina ships is FFPE/NovaSeq 6000-derived, Illumina calls WGS
+# tumor-only MSI less tested, and ~31-34x coverage leaves few sites above the
+# coverage threshold. Sites file + threshold must match the baseline's.
+enable_msi: false
+msi_microsatellites_file: "/staging/human/reference/hg38/dragen_resources/msi/WGS_v1.1.0_hg38_microsatellites.list"
+msi_ref_normal: "/staging/human/reference/hg38/dragen_resources/msi/WGS_FFPE_NovaSeq_6K_hg38_MSI_baselines_v1.1.0.combined.dist"
 msi_coverage_threshold: 40
 
 # Gene-panel variant extraction (any curated gene list). When true,
