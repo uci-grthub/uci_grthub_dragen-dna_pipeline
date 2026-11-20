@@ -37,11 +37,15 @@ emit_gvcf: true        # --vc-emit-ref-confidence GVCF (keeps joint genotyping o
 
 # ---- mode: tumor_only. DRAGEN somatic tumor-only WGS (recipe: "DNA Somatic Tumor-Only Solid WGS") ----
 # Organoids have no matched normal, so somatic calls come from tumor-only mode.
-# Re-maps from FASTQ on the LINEAR hashtable (DRAGEN recommends linear for
+# Re-maps from FASTQ on a LINEAR hashtable (DRAGEN recommends linear for
 # somatic; the germline BAMs above are pangenome-aligned). Outputs land in
 # <somatic_outdir>/<sample>/ and do not collide with the germline run.
 somatic_outdir: "output/somatic"
-somatic_reference: "/staging/human/reference/hg38/hg38_hash_table_v11"
+# Illumina prebuilt linear hg38 alt-masked, hashtable v11, CNV-enabled
+# (kmer_cnv.bin, required for tumor-only CNV self-normalization; our own
+# hg38_hash_table_v11 lacks it). Same reference family the Illumina systematic
+# noise baselines were built on.
+somatic_reference: "/staging/human/reference/hg38/hg38-alt_masked.cnv.hla.methyl_cg.methylated_combined.rna-11-r5.0-1"
 vc_target_vaf: 0.03            # recipe default (>= 3% VAF)
 # Nirvana data dir (Cache/ References/ SupplementaryAnnotation/) used by DRAGEN
 # for germline tagging (gnomAD/1000G population filter) and TMB.
