@@ -6,6 +6,13 @@ dragen_version: "4.4.7"
 ica_version: "3.26.0"          # Illumina Connected Annotations (Nirvana)
 hashtable_version: "11"        # hg38 pangenome reference
 
+# Analysis mode (REQUIRED, no default): "germline" or "tumor_only".
+# Left empty on purpose so every run is an explicit choice; the workflow
+# refuses to start otherwise. Override per run: --config mode=tumor_only
+#   germline   -> rule dragen (pangenome) + Nirvana + pipeline report (+ panel)
+#   tumor_only -> rule dragen_somatic (linear hashtable, DRAGEN tumor-only recipe)
+mode: ""
+
 # Sample sheet: CSV with `sample,R1,R2` lines (# comments ignored).
 # Regenerate with: pixi run samples
 # Sample names come from metadata_csv (matched on the i7-i5 barcode pair in
@@ -27,6 +34,31 @@ enable_sv: true        # --enable-sv (Manta-based SV caller)
 enable_repeats: true   # --repeat-genotype-enable (ExpansionHunter, default catalog)
 enable_pgx: true       # --enable-targeted + --enable-star-allele + --enable-pgx
 emit_gvcf: true        # --vc-emit-ref-confidence GVCF (keeps joint genotyping open)
+
+# ---- mode: tumor_only. DRAGEN somatic tumor-only WGS (recipe: "DNA Somatic Tumor-Only Solid WGS") ----
+# Organoids have no matched normal, so somatic calls come from tumor-only mode.
+# Re-maps from FASTQ on the LINEAR hashtable (DRAGEN recommends linear for
+# somatic; the germline BAMs above are pangenome-aligned). Outputs land in
+# <somatic_outdir>/<sample>/ and do not collide with the germline run.
+somatic_outdir: "output/somatic"
+somatic_reference: "/staging/human/reference/hg38/hg38_hash_table_v11"
+vc_target_vaf: 0.03            # recipe default (>= 3% VAF)
+# Nirvana data dir (Cache/ References/ SupplementaryAnnotation/) used by DRAGEN
+# for germline tagging (gnomAD/1000G population filter) and TMB.
+variant_annotation_data: "/staging/human/reference/hg38/annotation_data_files"
+enable_somatic_sv: true
+enable_somatic_cnv: true       # self-normalized; add pop BAF VCF below for tumor-only BAF
+enable_hrd: true               # requires somatic CNV
+enable_tmb: true               # + --tmb-enable-proxi-filter (recommended for tumor-only)
+# Resources from Illumina DRAGEN product files (not shipped in /opt/dragen).
+# Empty string = flag omitted. vc_systematic_noise is REQUIRED by the recipe;
+# the dragen_somatic rule refuses to run without it.
+vc_systematic_noise: ""        # WGS SNV systematic-noise BED (hg38)
+sv_systematic_noise: ""        # WGS SV systematic-noise BEDPE (hg38), recommended
+cnv_population_baf_vcf: ""     # population SNP VCF for tumor-only CNV BAF
+msi_microsatellites_file: ""   # MSI sites list; MSI runs only when this is set
+msi_ref_normal: ""             # MSI reference-normal PON (--msi-ref-normal-input)
+msi_coverage_threshold: 40
 
 # Gene-panel variant extraction (any curated gene list). When true,
 # symbols in <panel_csv> col1 (gene_symbol) are looked up in gene_gtf -> BED,

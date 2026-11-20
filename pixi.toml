@@ -26,7 +26,11 @@ openpyxl = "*"      # write panel DB -> .xlsx
 samples = "bash src/make-sample-file.sh --abs --metadata metadata/metadata.csv --output data/samples.csv"
 # rebuild the sourced pain-gene panel (QuickGO GO terms + CPIC/PharmGKB PGx)
 pain-genes = "bash src/fetch_pain_genes.sh"
-# dry-run the workflow (no execution)
+# dry-run the workflow (no execution); `mode` must be set in config/config.yaml
 dryrun = "snakemake -n --resources dragen=1"
+dryrun-germline = "snakemake -n --resources dragen=1 --config mode=germline"
+dryrun-tumor-only = "snakemake -n --resources dragen=1 --config mode=tumor_only"
 # run the full pipeline; DRAGEN serialized to one FPGA job at a time
 run = "snakemake --cores all --resources dragen=1"
+run-germline = "snakemake --cores all --resources dragen=1 --config mode=germline"
+run-tumor-only = "snakemake --cores all --resources dragen=1 --config mode=tumor_only"
