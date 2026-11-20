@@ -8,3 +8,4 @@ results/
 !.pixi/config.toml
 # snakemake internal state
 .snakemake/
+__pycache__/

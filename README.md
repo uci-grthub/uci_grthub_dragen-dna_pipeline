@@ -71,6 +71,10 @@ JSON (gnomAD, ClinVar, dbSNP, REVEL, phyloP) and loaded into:
 - tumor_only: `results/somatic/client/<panel_name>_summary.{xlsx,md,pdf}`, the
   short client deliverable (gene x sample matrix, alteration table, methods
   and limitations text)
+- tumor_only: `results/somatic/client/somatic_candidates.{xlsx,tsv}`, the less
+  curated list: genome-wide rare protein-altering PASS calls (panel genes
+  flagged), every non-common panel-gene call with the reason it is not in the
+  summary, and a filter-count sheet. Intermediates in `results/somatic/candidates/`
 
 The panel is defined by three config keys:
 

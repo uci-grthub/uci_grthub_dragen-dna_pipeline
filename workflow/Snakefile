@@ -62,6 +62,9 @@ PANEL_XLSX = os.path.join(RESULTS, PANEL + "_variants.xlsx")
 PANEL_REPORT_MD = os.path.join(RESULTS, PANEL + "_report.md")
 PANEL_REPORT = os.path.join(RESULTS, PANEL + "_report.pdf")
 PANEL_CLIENT = os.path.join(RESULTS, "client", PANEL + "_summary")
+# tumor_only: genome-wide rare protein-altering candidates (client list)
+CAND_DIR = os.path.join(RESULTS, "candidates")
+CAND_OUT = os.path.join(RESULTS, "client", "somatic_candidates")
 PIPELINE_REPORT_MD = os.path.join(RESULTS, "pipeline_report.md")
 PIPELINE_REPORT = os.path.join(RESULTS, "pipeline_report.pdf")
 
@@ -130,6 +133,7 @@ rule all:
         else [],
         # short client summary (tumor_only panel only)
         [PANEL_CLIENT + ext for ext in (".xlsx", ".md", ".pdf")]
+        + [CAND_OUT + ".xlsx", CAND_OUT + ".tsv"]
         if config["enable_panel"] and MODE == "tumor_only"
         else [],
 
@@ -693,6 +697,7 @@ rule panel_db:
         json=PANEL_JSON,
         csv=config["panel_csv"],
         script="src/panel_tables.py",
+        json2tsv="src/nirvana_json_to_tsv.sh",
     output:
         db=PANEL_DB,
     log:
@@ -730,22 +735,7 @@ rule panel_db:
                 {input.csv} - >{params.vtsv}
 
         # site-level annotations keyed by vid (== CSQ VariantId)
-        zcat {input.json} | jq -r '
-            .positions[].variants[]
-            | [ .vid,
-                (.dbsnp // [] | join(",")),
-                (.gnomad.allAf // ""),
-                (.gnomad.allHc // ""),
-                ([.clinvar[]?.classifications.germlineClassification.classification]
-                    | map(select(.)) | unique | join(";")),
-                ([.clinvar[]?.classifications.germlineClassification.reviewStatus]
-                    | map(select(.)) | unique | join(";")),
-                ([.clinvar[]?.classifications.germlineClassification.conditions[]?.traits[]?.name.value]
-                    | map(select(. and . != "not provided")) | unique | join(";")),
-                (.revel.score // ""),
-                (.phylopScore // "")
-              ] | @tsv' \
-            | awk -F'\t' '!seen[$1]++' >{params.atsv}
+        bash {input.json2tsv} {input.json} >{params.atsv}
 
         rm -f {output.db}
         sqlite3 {output.db} <<'SQL'
@@ -920,6 +910,122 @@ if MODE == "tumor_only":
             pandoc {output.md} -o {output.pdf} \
                 --pdf-engine=typst \
                 -V fontsize=10pt -V margin-x=1.8cm -V margin-y=1.8cm
+            """
+
+    # Genome-wide candidate list (less curated than the panel summary).
+    # PASS calls not tagged Germline_DB (~40-65k per sample) are Nirvana
+    # annotated (CSQ per sample, JSON once for the merged sites), then filtered
+    # to rare protein-altering calls by src/somatic_candidates.py.
+    rule candidates_raw:
+        input:
+            vcf=os.path.join(
+                SOMATIC_OUTDIR,
+                PANEL_CALIB,
+                "{sample}",
+                "{sample}.hard-filtered.vcf.gz",
+            ),
+        output:
+            vcf=os.path.join(CAND_DIR, "{sample}.raw.vcf.gz"),
+            tbi=os.path.join(CAND_DIR, "{sample}.raw.vcf.gz.tbi"),
+        log:
+            os.path.join(LOGDIR, "candidates_raw", "{sample}.log"),
+        shell:
+            r"""
+            exec 2>{log}
+            bcftools view -f PASS -e 'INFO/GermlineStatus="Germline_DB"' \
+                {input.vcf} -Oz -o {output.vcf}
+            tabix -f -p vcf {output.vcf}
+            """
+
+    rule candidates_csq:
+        input:
+            vcf=os.path.join(CAND_DIR, "{sample}.raw.vcf.gz"),
+        output:
+            vcf=os.path.join(CAND_DIR, "{sample}.csq.vcf.gz"),
+        log:
+            os.path.join(LOGDIR, "candidates_csq", "{sample}.log"),
+        benchmark:
+            os.path.join(BENCHDIR, "candidates_csq", "{sample}.tsv")
+        params:
+            bin=config["nirvana_bin"],
+            cache=config["nirvana_cache"],
+            dat=config["nirvana_dat"],
+            sd=config["nirvana_sd"],
+            out_prefix=lambda wc: os.path.join(CAND_DIR, wc.sample + ".csq"),
+        shell:
+            r"""
+            exec 2>{log}
+            {params.bin} -c {params.cache} -r {params.dat} --sd {params.sd} \
+                --output-format vcf -i {input.vcf} -o {params.out_prefix}
+            """
+
+    rule candidates_annotate:
+        input:
+            vcfs=expand(os.path.join(CAND_DIR, "{sample}.raw.vcf.gz"), sample=SAMPLES),
+            tbis=expand(
+                os.path.join(CAND_DIR, "{sample}.raw.vcf.gz.tbi"), sample=SAMPLES
+            ),
+        output:
+            sites=os.path.join(CAND_DIR, "sites.vcf.gz"),
+            json=os.path.join(CAND_DIR, "sites.json.gz"),
+        log:
+            os.path.join(LOGDIR, "candidates_annotate.log"),
+        benchmark:
+            os.path.join(BENCHDIR, "candidates_annotate.tsv")
+        params:
+            bin=config["nirvana_bin"],
+            cache=config["nirvana_cache"],
+            dat=config["nirvana_dat"],
+            sd=config["nirvana_sd"],
+            out_prefix=os.path.join(CAND_DIR, "sites"),
+        shell:
+            r"""
+            exec 2>{log}
+            bcftools merge {input.vcfs} | bcftools view -G -Oz -o {output.sites}
+            {params.bin} -c {params.cache} -r {params.dat} --sd {params.sd} \
+                --output-format json -i {output.sites} -o {params.out_prefix}
+            """
+
+    rule candidates_table:
+        input:
+            csq=expand(os.path.join(CAND_DIR, "{sample}.csq.vcf.gz"), sample=SAMPLES),
+            raw=expand(os.path.join(CAND_DIR, "{sample}.raw.vcf.gz"), sample=SAMPLES),
+            json=os.path.join(CAND_DIR, "sites.json.gz"),
+            db=PANEL_DB,
+            params=expand(
+                os.path.join(
+                    SOMATIC_OUTDIR,
+                    PANEL_CALIB,
+                    "{sample}",
+                    "{sample}.somatic_params.yaml",
+                ),
+                sample=SAMPLES,
+            ),
+            json2tsv="src/nirvana_json_to_tsv.sh",
+            script="src/somatic_candidates.py",
+            helpers="src/panel_client_summary.py",
+        output:
+            xlsx=CAND_OUT + ".xlsx",
+            tsv=CAND_OUT + ".tsv",
+        log:
+            os.path.join(LOGDIR, "candidates_table.log"),
+        params:
+            ctsv=os.path.join(CAND_DIR, "csq.tsv"),
+            atsv=os.path.join(CAND_DIR, "annotations.tsv"),
+            ntsv=os.path.join(CAND_DIR, "raw_counts.tsv"),
+        shell:
+            r"""
+            exec 2>{log}
+            for f in {input.csq}; do
+                bcftools +split-vep "$f" -d \
+                    -f '[%CHROM\t%POS\t%REF\t%ALT\t%SAMPLE\t%GT\t%DP\t%GeneSymbol\t%Feature\t%Canonical\t%Consequence\t%Impact\t%HGVSc\t%HGVSp\t%VariantId\t%FILTER\t%AF\t%INFO/GermlineStatus\t%INFO/CTB\n]'
+            done >{params.ctsv}
+            bash {input.json2tsv} {input.json} >{params.atsv}
+            for f in {input.raw}; do
+                printf '%s\t%s\n' "$(bcftools query -l "$f")" "$(bcftools view -H "$f" | wc -l)"
+            done >{params.ntsv}
+            python3 {input.script} {params.ctsv} {params.atsv} {params.ntsv} {input.db} \
+                {output.xlsx} {output.tsv} {input.params}
             """
 
 
