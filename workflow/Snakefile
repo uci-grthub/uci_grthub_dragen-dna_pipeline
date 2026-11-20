@@ -43,17 +43,72 @@ PANEL_REPORT_MD = os.path.join(RESULTS, PANEL + "_report.md")
 PANEL_REPORT = os.path.join(RESULTS, PANEL + "_report.pdf")
 PIPELINE_REPORT_MD = os.path.join(RESULTS, "pipeline_report.md")
 PIPELINE_REPORT = os.path.join(RESULTS, "pipeline_report.pdf")
+SOMATIC_OUTDIR = config["somatic_outdir"]
+
+# ---- analysis mode: must be chosen explicitly (no default) ----
+# Set `mode:` in config/config.yaml or pass `--config mode=germline|tumor_only`.
+MODES = ("germline", "tumor_only")
+MODE = config.get("mode") or ""
+if MODE not in MODES:
+    raise ValueError(
+        f"config 'mode' must be one of {MODES}, got {MODE!r}. Choose explicitly: "
+        "set `mode:` in config/config.yaml or run with `--config mode=<mode>`."
+    )
+if MODE == "tumor_only" and config["enable_panel"]:
+    raise ValueError(
+        "enable_panel is not yet wired to tumor_only outputs (it reads the "
+        "germline annotated VCFs); set enable_panel: false for tumor_only."
+    )
+
+MODE_VCFS = {
+    "germline": os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
+    "tumor_only": os.path.join(
+        SOMATIC_OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"
+    ),
+}
+MODE_TARGETS = expand(MODE_VCFS[MODE], sample=SAMPLES) + (
+    [PIPELINE_REPORT] if MODE == "germline" else []
+)
+
+
+def somatic_flags():
+    """DRAGEN tumor-only flags; optional resources omitted when their path is empty."""
+    c = config
+    f = [f"--vc-target-vaf {c['vc_target_vaf']}"]
+    if c["vc_systematic_noise"]:
+        f.append(f"--vc-systematic-noise {c['vc_systematic_noise']}")
+    f += [
+        f"--variant-annotation-data {c['variant_annotation_data']}",
+        "--vc-enable-germline-tagging true",
+    ]
+    if c["enable_somatic_sv"]:
+        f.append("--enable-sv true")
+        if c["sv_systematic_noise"]:
+            f.append(f"--sv-systematic-noise {c['sv_systematic_noise']}")
+    if c["enable_somatic_cnv"]:
+        f.append("--enable-cnv true --cnv-enable-self-normalization true")
+        if c["cnv_population_baf_vcf"]:
+            f.append(f"--cnv-population-b-allele-vcf {c['cnv_population_baf_vcf']}")
+        if c["enable_hrd"]:
+            f.append("--enable-hrd true")
+    if c["enable_tmb"]:
+        f.append("--enable-tmb true --tmb-enable-proxi-filter true")
+    if c["msi_microsatellites_file"]:
+        f += [
+            "--msi-command tumor-only",
+            f"--msi-microsatellites-file {c['msi_microsatellites_file']}",
+            f"--msi-coverage-threshold {c['msi_coverage_threshold']}",
+        ]
+        if c["msi_ref_normal"]:
+            f.append(f"--msi-ref-normal-input {c['msi_ref_normal']}")
+    return " ".join(f)
 
 
 rule all:
     input:
         os.path.join(OUTDIR, "versions.yaml"),
         os.path.join(OUTDIR, "multiqc", "multiqc_report.html"),
-        expand(
-            os.path.join(OUTDIR, "{sample}", "{sample}.annotated.vcf.gz"),
-            sample=SAMPLES,
-        ),
-        PIPELINE_REPORT,
+        MODE_TARGETS,
         # gene-panel extraction only when enabled
         [PANEL_DB, PANEL_XLSX, PANEL_VCF, PANEL_REPORT]
         if config["enable_panel"]
@@ -161,6 +216,66 @@ rule dragen:
         """
 
 
+# DRAGEN somatic tumor-only WGS ("DNA Somatic Tumor-Only Solid WGS" recipe).
+# Organoids have no matched normal: germline tagging against population DBs
+# (--variant-annotation-data) stands in for the normal. Re-maps on the linear
+# hashtable; SNV/indel + optional SV / CNV (+HRD) / TMB / MSI in one run.
+# Serialized with the germline rule via resources: dragen=1.
+rule dragen_somatic:
+    input:
+        r1=lambda wc: SAMPLES[wc.sample][0],
+        r2=lambda wc: SAMPLES[wc.sample][1],
+    output:
+        vcf=os.path.join(SOMATIC_OUTDIR, "{sample}", "{sample}.hard-filtered.vcf.gz"),
+    log:
+        os.path.join(LOGDIR, "dragen_somatic", "{sample}.log"),
+    benchmark:
+        os.path.join(BENCHDIR, "dragen_somatic", "{sample}.tsv")
+    resources:
+        dragen=1,
+    params:
+        dragen=config["dragen_bin"],
+        ref=config["somatic_reference"],
+        rgid=config["rgid"],
+        adapter_r1=config["trim_adapter_r1"],
+        adapter_r2=config["trim_adapter_r2"],
+        min_q=config["trim_min_quality"],
+        min_len=config["trim_min_length"],
+        noise=config["vc_systematic_noise"],
+        flags=somatic_flags(),
+        outdir=lambda wc: os.path.join(SOMATIC_OUTDIR, wc.sample),
+    shell:
+        r"""
+        exec 2>{log}
+        if [ ! -s "{params.noise}" ]; then
+            echo "vc_systematic_noise unset or missing: required for tumor-only WGS" >&2
+            exit 1
+        fi
+        mkdir -p {params.outdir}
+        {params.dragen} -f \
+            -r {params.ref} \
+            --tumor-fastq1 {input.r1} \
+            --tumor-fastq2 {input.r2} \
+            --RGID-tumor {params.rgid} \
+            --RGSM-tumor {wildcards.sample} \
+            --output-directory {params.outdir} \
+            --output-file-prefix {wildcards.sample} \
+            --enable-map-align true \
+            --enable-map-align-output true \
+            --output-format BAM \
+            --enable-sort true \
+            --enable-duplicate-marking true \
+            --enable-variant-caller true \
+            --read-trimmers adapter,quality \
+            --trim-adapter-read1 {params.adapter_r1} \
+            --trim-adapter-read2 {params.adapter_r2} \
+            --trim-min-quality {params.min_q} \
+            --trim-min-length {params.min_len} \
+            --enable-metrics-json true \
+            {params.flags}
+        """
+
+
 # Nirvana annotation of the hard-filtered VCF (GRCh38), emitting an annotated VCF.
 rule nirvana:
     input:
@@ -189,7 +304,7 @@ rule nirvana:
 # Aggregate all DRAGEN QC into a single MultiQC report.
 rule multiqc:
     input:
-        bams=expand(os.path.join(OUTDIR, "{sample}", "{sample}.bam"), sample=SAMPLES),
+        vcfs=MODE_TARGETS,
         cfg="config/multiqc_config.yaml",
     output:
         os.path.join(OUTDIR, "multiqc", "multiqc_report.html"),

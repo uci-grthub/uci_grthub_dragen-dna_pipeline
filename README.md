@@ -108,6 +108,6 @@ Cohort-level:
 
 Format the Snakefile with `pixi run snakefmt workflow/Snakefile`.
 
-Legacy standalone drivers (`src/dragen-run.sh`, `src/run-nirvana.sh`,
+Legacy standalone drivers (`src/run-nirvana.sh`,
 `src/WGS_bwa_gatk.sh`, `src/run_chen.sh`) are not used by the workflow.
 See `docs/updating-nirvana-cache.md` for refreshing Nirvana annotation data.
