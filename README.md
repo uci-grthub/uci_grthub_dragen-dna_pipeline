@@ -68,6 +68,9 @@ JSON (gnomAD, ClinVar, dbSNP, REVEL, phyloP) and loaded into:
 
 - `results/<mode>/<panel_name>_variants.sqlite` (+ `.xlsx`, `.vcf.gz`; tumor_only adds `pathway_hits` and `panel_gene_cnv`)
 - `results/<mode>/<panel_name>_report.pdf`
+- tumor_only: `results/somatic/client/<panel_name>_summary.{xlsx,md,pdf}`, the
+  short client deliverable (gene x sample matrix, alteration table, methods
+  and limitations text)
 
 The panel is defined by three config keys:
 

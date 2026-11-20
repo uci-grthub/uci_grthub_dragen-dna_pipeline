@@ -61,6 +61,7 @@ PANEL_DB = os.path.join(RESULTS, PANEL + "_variants.sqlite")
 PANEL_XLSX = os.path.join(RESULTS, PANEL + "_variants.xlsx")
 PANEL_REPORT_MD = os.path.join(RESULTS, PANEL + "_report.md")
 PANEL_REPORT = os.path.join(RESULTS, PANEL + "_report.pdf")
+PANEL_CLIENT = os.path.join(RESULTS, "client", PANEL + "_summary")
 PIPELINE_REPORT_MD = os.path.join(RESULTS, "pipeline_report.md")
 PIPELINE_REPORT = os.path.join(RESULTS, "pipeline_report.pdf")
 
@@ -126,6 +127,10 @@ rule all:
         # gene-panel extraction only when enabled
         [PANEL_DB, PANEL_XLSX, PANEL_VCF, PANEL_REPORT]
         if config["enable_panel"]
+        else [],
+        # short client summary (tumor_only panel only)
+        [PANEL_CLIENT + ext for ext in (".xlsx", ".md", ".pdf")]
+        if config["enable_panel"] and MODE == "tumor_only"
         else [],
 
 
@@ -882,6 +887,40 @@ rule panel_xlsx:
         exec 2>{log}
         python3 {input.script} {input.db} {output.xlsx} {PANEL} {params.desc:q}
         """
+
+
+# Short client summary of the tumor-only panel: gene x sample matrix,
+# alteration table, methods + limitations text (xlsx, one-page md / PDF).
+# The full DB / xlsx stay the internal record.
+if MODE == "tumor_only":
+
+    rule panel_client_summary:
+        input:
+            db=PANEL_DB,
+            params=expand(
+                os.path.join(
+                    SOMATIC_OUTDIR,
+                    PANEL_CALIB,
+                    "{sample}",
+                    "{sample}.somatic_params.yaml",
+                ),
+                sample=SAMPLES,
+            ),
+            script="src/panel_client_summary.py",
+        output:
+            xlsx=PANEL_CLIENT + ".xlsx",
+            md=PANEL_CLIENT + ".md",
+            pdf=PANEL_CLIENT + ".pdf",
+        log:
+            os.path.join(LOGDIR, "panel_client_summary.log"),
+        shell:
+            r"""
+            exec 2>{log}
+            python3 {input.script} {input.db} {output.xlsx} {output.md} {input.params}
+            pandoc {output.md} -o {output.pdf} \
+                --pdf-engine=typst \
+                -V fontsize=10pt -V margin-x=1.8cm -V margin-y=1.8cm
+            """
 
 
 # Human-readable PDF report: overview, live summary stats, pipeline steps,
