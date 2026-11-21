@@ -1,7 +1,7 @@
 # Config for the DRAGEN germline WGS + Nirvana + MultiQC Snakemake workflow.
 
 # Tool / reference versions (provenance record). The `versions` rule also
-# writes the live-detected values to <outdir>/versions.yaml at run time.
+# writes the live-detected values to <mode root>/versions.yaml at run time.
 dragen_version: "4.4.7"
 ica_version: "3.26.0"          # Illumina Connected Annotations (Nirvana)
 hashtable_version: "11"        # hg38 pangenome reference
@@ -20,8 +20,10 @@ mode: ""
 samples_csv: "data/samples.csv"
 metadata_csv: "metadata/metadata.csv"
 
-# Base output directory (one subdirectory per sample is created).
-outdir: "output"
+# Per-mode output roots (samples, logs, benchmarks, multiqc, versions.yaml).
+# Results (reports, panel) go to results/germline/ or results/somatic/.
+germline_outdir: "output/germline"
+somatic_outdir: "output/somatic"
 
 # DRAGEN binary and reference (hg38 pangenome, hashtable v11).
 dragen_bin: "/opt/dragen/4.4.7/bin/dragen"
@@ -37,27 +39,63 @@ emit_gvcf: true        # --vc-emit-ref-confidence GVCF (keeps joint genotyping o
 
 # ---- mode: tumor_only. DRAGEN somatic tumor-only WGS (recipe: "DNA Somatic Tumor-Only Solid WGS") ----
 # Organoids have no matched normal, so somatic calls come from tumor-only mode.
-# Re-maps from FASTQ on the LINEAR hashtable (DRAGEN recommends linear for
-# somatic; the germline BAMs above are pangenome-aligned). Outputs land in
-# <somatic_outdir>/<sample>/ and do not collide with the germline run.
-somatic_outdir: "output/somatic"
-somatic_reference: "/staging/human/reference/hg38/hg38_hash_table_v11"
+# Re-maps from FASTQ on a LINEAR hashtable (DRAGEN recommends linear for
+# somatic; the germline BAMs above are pangenome-aligned). Shared BAM in
+# <somatic_outdir>/align/<sample>/, calls in <somatic_outdir>/<calib>/<sample>/.
+# Illumina prebuilt linear hg38 alt-masked, hashtable v11, CNV-enabled
+# (kmer_cnv.bin, required for tumor-only CNV self-normalization; our own
+# hg38_hash_table_v11 lacks it). Same reference family the Illumina systematic
+# noise baselines were built on.
+somatic_reference: "/staging/human/reference/hg38/hg38-alt_masked.cnv.hla.methyl_cg.methylated_combined.rna-11-r5.0-1"
 vc_target_vaf: 0.03            # recipe default (>= 3% VAF)
+# Pass 2 runs once per calibration variant (outputs output/somatic/<calib>/):
+#   default -> DRAGEN defaults (callability 50 reads, CNV bins 1 kb)
+#   auto    -> per-sample, from median autosomal coverage of the somatic BAM:
+#     callability = clamp(round(callability_fraction * median), min, max)
+#     cnv_interval_width = clamp(ceil_1kb(1000 * cnv_ref_cov / median),
+#                                1000, cnv_interval_width_max)
+#     plus --vc-germline-tag-hotspots false (never tag COSMIC hotspots germline)
+# DRAGEN's defaults assume ~100x tumors; at ~25x the 50-read threshold leaves
+# ~nothing callable (TMB = 0) and 1 kb CNV bins abort segmentation.
+somatic_calibrations: ["default", "auto"]
+callability_fraction: 0.5
+callability_min: 10
+callability_max: 50
+callability_override: ""
+cnv_ref_cov: 100
+cnv_interval_width_max: 10000
+cnv_interval_width_override: ""
 # Nirvana data dir (Cache/ References/ SupplementaryAnnotation/) used by DRAGEN
-# for germline tagging (gnomAD/1000G population filter) and TMB.
-variant_annotation_data: "/staging/human/reference/hg38/annotation_data_files"
+# for germline tagging (gnomAD/1000G population filter) and TMB. Must match the
+# versions DRAGEN 4.4.7 pins in resources/annotation/tmb_annotations_GRCh38.json
+# (trimmed gnomAD 4.1, 1000G Ph3, COSMIC 99, ClinVar 20240902, Ensembl 112).
+# The shared annotation_data_files (ICA 3.26, newer) is rejected. Fetched with:
+#   /opt/dragen/4.4.7/share/nirvana/DataManager download -r GRCh38 -d <dir> \
+#     --versions-config /opt/dragen/4.4.7/resources/annotation/tmb_annotations_GRCh38.json
+variant_annotation_data: "/staging/human/reference/hg38/dragen_resources/tmb_annotations_GRCh38"
 enable_somatic_sv: true
 enable_somatic_cnv: true       # self-normalized; add pop BAF VCF below for tumor-only BAF
 enable_hrd: true               # requires somatic CNV
 enable_tmb: true               # + --tmb-enable-proxi-filter (recommended for tumor-only)
-# Resources from Illumina DRAGEN product files (not shipped in /opt/dragen).
-# Empty string = flag omitted. vc_systematic_noise is REQUIRED by the recipe;
-# the dragen_somatic rule refuses to run without it.
-vc_systematic_noise: ""        # WGS SNV systematic-noise BED (hg38)
-sv_systematic_noise: ""        # WGS SV systematic-noise BEDPE (hg38), recommended
-cnv_population_baf_vcf: ""     # population SNP VCF for tumor-only CNV BAF
-msi_microsatellites_file: ""   # MSI sites list; MSI runs only when this is set
-msi_ref_normal: ""             # MSI reference-normal PON (--msi-ref-normal-input)
+# Resources from Illumina DRAGEN product files (not shipped in /opt/dragen),
+# downloaded 2026-11-20 to /staging/human/reference/hg38/dragen_resources/downloads/
+# (archives + MD5SUMS.downloaded) and extracted alongside. Empty string = flag
+# omitted. vc_systematic_noise is REQUIRED by the recipe; the dragen_somatic
+# rule refuses to run without it.
+# Alternative germline-tagging DB if the Nirvana dir above is rejected:
+#   /staging/human/reference/hg38/dragen_resources/germline_tagging/germline_tagging_data-v2.0.bin
+# SNV baseline v2.0.0 (DRAGEN 4.3/4.4): mixed prep, 40 FF samples, 70x.
+vc_systematic_noise: "/staging/human/reference/hg38/dragen_resources/snv/WGS_hg38_v2.0.0_systematic_noise.snv.bed.gz"
+# SV baseline v3.1.0 (DRAGEN 4.4): TruSeq PCR-free 1kg cell lines, 30x; FF + FFPE.
+sv_systematic_noise: "/staging/human/reference/hg38/dragen_resources/sv/WGS_hg38_v3.1.0_systematic_noise.sv.bedpe.gz"
+cnv_population_baf_vcf: "/staging/human/reference/hg38/dragen_resources/cnv/hg38_1000G_phase1.snps.high_confidence.vcf.gz"
+# MSI (microsatellite-files v1.1.1). Off by default: the only WGS normal
+# baseline Illumina ships is FFPE/NovaSeq 6000-derived, Illumina calls WGS
+# tumor-only MSI less tested, and ~31-34x coverage leaves few sites above the
+# coverage threshold. Sites file + threshold must match the baseline's.
+enable_msi: false
+msi_microsatellites_file: "/staging/human/reference/hg38/dragen_resources/msi/WGS_v1.1.0_hg38_microsatellites.list"
+msi_ref_normal: "/staging/human/reference/hg38/dragen_resources/msi/WGS_FFPE_NovaSeq_6K_hg38_MSI_baselines_v1.1.0.combined.dist"
 msi_coverage_threshold: 40
 
 # Gene-panel variant extraction (any curated gene list). When true,
@@ -71,16 +109,20 @@ msi_coverage_threshold: 40
 #   exome_capture_note (free-text coverage/recoverability caveat).
 # To switch panels: point panel_csv at the new CSV, change panel_name and
 # panel_description. Outputs for different panel_name values do not collide.
-enable_panel: false
-panel_csv: "data/pain_gene_panel_from_zeev_kain.csv"
-panel_name: "pain"          # basename for results/<panel_name>_*; shown in reports
+enable_panel: true
+panel_csv: "config/panels/pi3k_rasmapk_panel.csv"
+panel_name: "pi3k_rasmapk"  # basename for results/<mode>/<panel_name>_*; shown in reports
+# tumor_only: which calibration variant (output/somatic/<calib>/) the panel reads
+panel_calibration: "auto"
 # One paragraph (Markdown ok) describing the panel's origin and scope; printed
 # in the panel PDF report and the xlsx README sheet.
 panel_description: >-
-  A-priori pain / analgesia candidate-gene list curated by Zeev Kain (copied
-  from the KainZ exome project): opioid pharmacokinetics / pharmacodynamics,
-  pain sensitivity and nociception, chronic postsurgical pain,
-  neuroinflammation and reward-axis genes.
+  Oncogenes and tumor suppressors of the PI3K and RAS/MAPK pathways plus
+  upstream receptor tyrosine kinases, assembled for the reviewer request on
+  endometrial cancer organoids (PT2, PT5), plus endometrial molecular-subtype
+  context genes (POLE, TP53, mismatch repair, ARID1A, CTNNB1). Hotspot rsIDs
+  in key_variants: PIK3CA E545K/E542K/H1047R, AKT1 E17K, KRAS G12/G13,
+  NRAS Q61, BRAF V600E.
 panel_gene_padding: 0       # bases added each side of each gene interval
 # GENCODE v47 GTF (GRCh38, chr-prefixed contigs; matches the VCF naming).
 gene_gtf: "/staging/human/reference/hg38/gencode/gencode.v47.primary_assembly.annotation.gtf.gz"
