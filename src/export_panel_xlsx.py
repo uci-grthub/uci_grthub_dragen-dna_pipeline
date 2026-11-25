@@ -5,6 +5,13 @@ Sheet 1 is a generated `Overview` (what each sheet is, what each column means,
 recommended filters). Then one sheet per table/view, the joined `panel_annotated`
 view first (the main deliverable).
 
+Size: WGS panels carry hundreds of thousands of variant x transcript rows (mostly
+intronic). Excel refuses workbooks whose sheet XML runs to ~1 GB, so the
+per-transcript objects are exported on the canonical Ensembl transcript only
+(TRANSCRIPT_FILTER, one row per variant x carrier sample), and the raw
+`panel_variants` table is left out (panel_annotated holds the same rows plus
+annotation). The SQLite DB keeps every transcript.
+
 Usage: export_panel_xlsx.py DB.sqlite OUT.xlsx
 """
 import sqlite3
@@ -30,8 +37,15 @@ def scalar(sql):
         return "n/a"
 
 
+# Per-transcript objects: export canonical Ensembl transcript rows only.
+TRANSCRIPT_FILTER = "feature LIKE 'ENST%' AND canonical = 'True'"
+CANONICAL_ONLY = {"panel_annotated"}
+SKIP_SHEETS = {"panel_variants"}
+
 # Deliverables first, raw tables last; anything new lands after the known names.
 SHEET_ORDER = [
+    "pathway_hits",
+    "panel_gene_cnv",
     "panel_annotated",
     "key_variant_status",
     "key_variant_carriers",
@@ -85,7 +99,7 @@ overview = [
     (
         TXT,
         "panel_annotated",
-        "one row per variant x transcript x carrier sample",
+        "one row per variant x carrier sample (canonical Ensembl transcript)",
         "START HERE. panel_variants + variant_annotations + gene metadata — genotypes, "
         "consequences, annotation and the is_key_variant flag all in one place.",
     ),
@@ -121,9 +135,10 @@ overview = [
     (
         TXT,
         "panel_variants",
-        "one row per variant x transcript x carrier sample",
-        "Genotype + predicted consequence. Hom-ref and missing genotypes are dropped, so a row "
-        "means that sample carries that allele.",
+        "not exported (SQLite only)",
+        "Genotype + predicted consequence on every transcript (hundreds of thousands of rows "
+        "for WGS). Same rows as panel_annotated, which this workbook limits to the canonical "
+        "Ensembl transcript; query the .sqlite file for all transcripts.",
     ),
     (
         TXT,
@@ -314,8 +329,11 @@ for style, *cells in overview:
 
 # ---- data sheets ----------------------------------------------------------
 for name in objs:
+    if name in SKIP_SHEETS:
+        continue
     ws = wb.create_sheet(title=name[:31])
-    rows = cur.execute(f'SELECT * FROM "{name}"')
+    where = f" WHERE {TRANSCRIPT_FILTER}" if name in CANONICAL_ONLY else ""
+    rows = cur.execute(f'SELECT * FROM "{name}"{where}')
     ws.append([c[0] for c in rows.description])  # header
     for row in rows:
         ws.append([row[k] for k in row.keys()])
